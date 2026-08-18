@@ -1,0 +1,25 @@
+"""
+Exact-error functionals and norms for finite element solutions.
+"""
+
+from jax_fem.diagnostics.errors import (
+    compute_energy_error,
+    compute_h1_seminorm_error,
+    compute_l2_error,
+    compute_relative_l2_error,
+)
+from jax_fem.diagnostics.norms import (
+    energy_error_density,
+    h1_seminorm_error_density,
+    l2_error_density,
+)
+
+__all__ = [
+    "compute_l2_error",
+    "compute_relative_l2_error",
+    "compute_h1_seminorm_error",
+    "compute_energy_error",
+    "l2_error_density",
+    "h1_seminorm_error_density",
+    "energy_error_density",
+]

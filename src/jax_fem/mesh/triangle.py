@@ -1,0 +1,345 @@
+"""Straight-sided triangular meshes.
+
+See Sections 7.2 and 7.3 of the architecture specification.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from collections.abc import Callable, Mapping
+from typing import TypeAlias
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+from jax.typing import ArrayLike
+
+# Local facet i is opposite local vertex i, matching
+# ReferenceTriangle.facets_to_vertices:
+#   facet 0 = (v1, v2), facet 1 = (v2, v0), facet 2 = (v0, v1).
+_LOCAL_FACETS_TO_LOCAL_VERTICES = np.array([[1, 2], [2, 0], [0, 1]])
+
+#: A mapping from boundary tag name to a predicate over boundary facet
+#: midpoint coordinates, shape ``(N_boundary_facets, 1, 2)``, returning a
+#: boolean array of shape ``(N_boundary_facets,)``.
+BoundaryData: TypeAlias = Mapping[str, Callable[[jax.Array], jax.Array]]
+
+_DEFAULT_BOUNDARY_TAG_NAME = "boundary"
+
+
+@dataclasses.dataclass(frozen=True, slots=True, eq=False)
+class TriangleMesh:
+    """
+    Geometry, topology, and mesh labels of a conforming triangular mesh.
+
+    The mesh owns all available physical and boundary tags.
+
+    Attributes
+    ----------
+    vertex_coordinates : jax.Array
+        Shape ``(N_vertices, 1, 2)``: each vertex is a row vector of shape
+        ``(1, 2)``, matching the coefficient callable contract directly.
+    cells_to_vertices : jax.Array
+        Shape ``(K, 3)``.
+    facets_to_vertices : jax.Array
+        Shape ``(N_facets, 2)``, canonical ``(low, high)`` vertex index
+        pairs.
+    cells_to_facets : jax.Array
+        Shape ``(K, 3)``, global facet index of each local facet.
+    facets_to_cells : jax.Array
+        Shape ``(N_facets, 2)``, adjacent cell indices; a missing second
+        cell (a boundary facet) uses the sentinel ``-1``.
+    boundary_facets : jax.Array
+        Shape ``(N_boundary_facets,)``, facet indices with only one
+        adjacent cell.
+    boundary_facet_tags : jax.Array
+        Shape ``(N_boundary_facets,)``, integer tag of each boundary facet.
+    cell_tags : jax.Array | None
+        Shape ``(K,)`` physical cell tags, or ``None`` if untagged.
+    boundary_tag_names : Mapping[str, int]
+        Mapping from boundary tag name to its integer value.
+    """
+
+    vertex_coordinates: jax.Array
+    cells_to_vertices: jax.Array
+    facets_to_vertices: jax.Array
+    cells_to_facets: jax.Array
+    facets_to_cells: jax.Array
+    boundary_facets: jax.Array
+    boundary_facet_tags: jax.Array
+    cell_tags: jax.Array | None
+    boundary_tag_names: Mapping[str, int]
+
+    @property
+    def geometric_dimension(self) -> int:
+        """
+        Geometric dimension of the mesh.
+
+        Returns
+        -------
+        int
+            Geometric dimension of the mesh.
+        """
+        return 2
+
+    @property
+    def topological_dimension(self) -> int:
+        """
+        Topological dimension of the mesh.
+
+        Returns
+        -------
+        int
+            Topological dimension of the mesh.
+        """
+        return 2
+
+
+def create_triangle_mesh_from_arrays(
+    vertex_coordinates: ArrayLike,
+    cells_to_vertices: ArrayLike,
+    *,
+    boundary_data: BoundaryData | None = None,
+) -> TriangleMesh:
+    """
+    Build a ``TriangleMesh`` from raw vertex and connectivity arrays.
+
+    Facet topology (``facets_to_vertices``, ``cells_to_facets``,
+    ``facets_to_cells``, ``boundary_facets``) is derived purely from
+    ``cells_to_vertices``; the caller never enumerates facets by hand.
+    ``boundary_data`` only tags the already-detected boundary facets.
+
+    Cell orientation (clockwise vs. counter-clockwise) is not validated or
+    corrected: the caller is trusted to supply consistently oriented cells.
+
+    Parameters
+    ----------
+    vertex_coordinates : ArrayLike
+        Array-like of shape ``(N_vertices, 2)``.
+    cells_to_vertices : ArrayLike
+        Array-like of shape ``(K, 3)`` of vertex indices into
+        ``vertex_coordinates``.
+    boundary_data : BoundaryData | None
+        Predicate-based boundary tagging. If ``None``, every
+        boundary facet receives one default tag (name ``"boundary"``,
+        value ``0``).
+
+    Returns
+    -------
+    TriangleMesh
+    """
+    vertex_coordinates_np = np.asarray(vertex_coordinates, dtype=np.float64)
+    cells_to_vertices_np = np.asarray(cells_to_vertices, dtype=np.int64)
+    _validate_array_mesh_input(vertex_coordinates_np, cells_to_vertices_np)
+
+    (
+        facets_to_vertices_np,
+        cells_to_facets_np,
+        facets_to_cells_np,
+        boundary_facets_np,
+    ) = _build_facet_topology(cells_to_vertices_np)
+
+    boundary_facet_tags_np, boundary_tag_names = _tag_boundary_facets(
+        vertex_coordinates_np,
+        facets_to_vertices_np,
+        boundary_facets_np,
+        boundary_data,
+    )
+
+    return TriangleMesh(
+        vertex_coordinates=jnp.expand_dims(
+            jnp.asarray(vertex_coordinates_np), axis =-2
+            ),
+        cells_to_vertices=jnp.asarray(cells_to_vertices_np, dtype=jnp.int32),
+        facets_to_vertices=jnp.asarray(facets_to_vertices_np, dtype=jnp.int32),
+        cells_to_facets=jnp.asarray(cells_to_facets_np, dtype=jnp.int32),
+        facets_to_cells=jnp.asarray(facets_to_cells_np, dtype=jnp.int32),
+        boundary_facets=jnp.asarray(boundary_facets_np, dtype=jnp.int32),
+        boundary_facet_tags=jnp.asarray(boundary_facet_tags_np, dtype=jnp.int32),
+        cell_tags=None,
+        boundary_tag_names=boundary_tag_names,
+    )
+
+
+def _validate_array_mesh_input(
+    vertex_coordinates: np.ndarray, cells_to_vertices: np.ndarray
+) -> None:
+    if vertex_coordinates.ndim != 2 or vertex_coordinates.shape[1] != 2:
+        raise ValueError(
+            "vertex_coordinates must have shape (N_vertices, 2), got "
+            f"{vertex_coordinates.shape}."
+        )
+    if cells_to_vertices.ndim != 2 or cells_to_vertices.shape[1] != 3:
+        raise ValueError(
+            "cells_to_vertices must have shape (K, 3), got "
+            f"{cells_to_vertices.shape}."
+        )
+    if cells_to_vertices.shape[0] == 0:
+        raise ValueError("cells_to_vertices must contain at least one cell.")
+
+    number_of_vertices = vertex_coordinates.shape[0]
+    if cells_to_vertices.min() < 0 or cells_to_vertices.max() >= number_of_vertices:
+        raise ValueError(
+            "cells_to_vertices references vertex indices outside "
+            f"[0, {number_of_vertices})."
+        )
+
+
+def _build_facet_topology(
+    cells_to_vertices: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Derive facet connectivity purely from cell-to-vertex topology.
+
+    Returns
+    -------
+    facets_to_vertices:
+        ``(N_facets, 2)``, canonical ``(low, high)`` vertex index pairs.
+    cells_to_facets:
+        ``(K, 3)``, global facet index of each local facet.
+    facets_to_cells:
+        ``(N_facets, 2)``, adjacent cell indices, ``-1`` sentinel for a
+        missing second cell.
+    boundary_facets:
+        ``(N_boundary_facets,)``, facet indices with only one adjacent cell.
+    """
+    number_of_cells = cells_to_vertices.shape[0]
+
+    # (K, 3, 2): for each cell and local facet, its two global vertex ids.
+    local_facet_vertices = cells_to_vertices[:, _LOCAL_FACETS_TO_LOCAL_VERTICES]
+    flat_facet_vertices = local_facet_vertices.reshape(-1, 2)
+    canonical_facet_vertices = np.sort(flat_facet_vertices, axis=1)
+
+    facets_to_vertices, inverse = np.unique(
+        canonical_facet_vertices, axis=0, return_inverse=True
+    )
+    inverse = inverse.reshape(-1)
+    number_of_facets = facets_to_vertices.shape[0]
+    cells_to_facets = inverse.reshape(number_of_cells, 3)
+
+    facet_occurrence_counts = np.bincount(inverse, minlength=number_of_facets)
+    if np.any(facet_occurrence_counts > 2):
+        bad_facets = np.nonzero(facet_occurrence_counts > 2)[0]
+        raise ValueError(
+            "Non-manifold mesh: facet(s) with vertices "
+            f"{facets_to_vertices[bad_facets].tolist()} are shared by more "
+            "than two cells."
+        )
+
+    cell_ids_flat = np.repeat(np.arange(number_of_cells), 3)
+    order = np.argsort(inverse, kind="stable")
+    sorted_facet_ids = inverse[order]
+    sorted_cell_ids = cell_ids_flat[order]
+
+    is_first_in_group = np.empty(sorted_facet_ids.shape[0], dtype=bool)
+    is_first_in_group[0] = True
+    is_first_in_group[1:] = sorted_facet_ids[1:] != sorted_facet_ids[:-1]
+
+    facets_to_cells = np.full((number_of_facets, 2), -1, dtype=np.int64)
+    facets_to_cells[sorted_facet_ids[is_first_in_group], 0] = sorted_cell_ids[
+        is_first_in_group
+    ]
+    facets_to_cells[sorted_facet_ids[~is_first_in_group], 1] = sorted_cell_ids[
+        ~is_first_in_group
+    ]
+
+    boundary_facets = np.nonzero(facets_to_cells[:, 1] == -1)[0]
+
+    return facets_to_vertices, cells_to_facets, facets_to_cells, boundary_facets
+
+
+def _tag_boundary_facets(
+    vertex_coordinates: np.ndarray,
+    facets_to_vertices: np.ndarray,
+    boundary_facets: np.ndarray,
+    boundary_data: BoundaryData | None,
+) -> tuple[np.ndarray, dict[str, int]]:
+    """Assign integer tags to already-detected boundary facets."""
+    if boundary_data is None:
+        boundary_data = {
+            _DEFAULT_BOUNDARY_TAG_NAME: lambda midpoints: jnp.ones(
+                midpoints.shape[0], dtype=bool
+            )
+        }
+
+    boundary_tag_names = {name: index for index, name in enumerate(boundary_data)}
+
+    number_of_boundary_facets = boundary_facets.shape[0]
+    boundary_facet_vertices = facets_to_vertices[boundary_facets]  # (Nb, 2)
+    midpoints = vertex_coordinates[boundary_facet_vertices].mean(axis=1)  # (Nb, 2)
+    midpoints_for_predicates = jnp.asarray(midpoints).reshape(-1, 1, 2)
+
+    tags = np.full(number_of_boundary_facets, -1, dtype=np.int64)
+    for name, predicate in boundary_data.items():
+        matched = np.asarray(predicate(midpoints_for_predicates))
+        if matched.shape != (number_of_boundary_facets,):
+            raise ValueError(
+                f"Boundary predicate {name!r} must return a boolean array "
+                f"of shape ({number_of_boundary_facets},), got "
+                f"{matched.shape}."
+            )
+        newly_matched = matched & (tags == -1)
+        tags[newly_matched] = boundary_tag_names[name]
+
+    if np.any(tags == -1):
+        unmatched = boundary_facets[tags == -1]
+        raise ValueError(
+            f"Boundary facets {unmatched.tolist()} matched no predicate in "
+            "boundary_data."
+        )
+
+    return tags, boundary_tag_names
+
+
+def create_structured_unit_square_mesh(number_of_cells_per_side: int) -> TriangleMesh:
+    """Build a structured triangular mesh of the unit square ``[0, 1]^2``.
+
+    An ``n x n`` grid of unit cells, each split into 2 triangles along the
+    same diagonal, with boundary facets tagged ``"bottom"`` (``y = 0``),
+    ``"right"`` (``x = 1``), ``"top"`` (``y = 1``), and ``"left"``
+    (``x = 0``). Intended for tests, teaching examples, and manufactured
+    problems (Section 7.3); Gmsh remains the primary way to mesh real
+    domains.
+
+    Parameters
+    ----------
+    number_of_cells_per_side:
+        Number of grid cells along each side, at least 1. The mesh has
+        ``2 * number_of_cells_per_side ** 2`` triangles.
+
+    Returns
+    -------
+    TriangleMesh
+    """
+    n = number_of_cells_per_side
+    if n < 1:
+        raise ValueError(
+            f"number_of_cells_per_side must be at least 1, got {n}."
+        )
+
+    coordinates_1d = np.linspace(0.0, 1.0, n + 1)
+    grid_x, grid_y = np.meshgrid(coordinates_1d, coordinates_1d, indexing="ij")
+    vertex_coordinates = np.stack((grid_x.reshape(-1), grid_y.reshape(-1)), axis=-1)
+
+    def vertex_index(i: int, j: int) -> int:
+        return i * (n + 1) + j
+
+    cells: list[tuple[int, int, int]] = []
+    for i in range(n):
+        for j in range(n):
+            bottom_left = vertex_index(i, j)
+            bottom_right = vertex_index(i + 1, j)
+            top_right = vertex_index(i + 1, j + 1)
+            top_left = vertex_index(i, j + 1)
+            cells.append((bottom_left, bottom_right, top_right))
+            cells.append((bottom_left, top_right, top_left))
+
+    return create_triangle_mesh_from_arrays(
+        vertex_coordinates,
+        np.asarray(cells),
+        boundary_data={
+            "bottom": lambda x: jnp.isclose(x[..., 0, 1], 0.0),
+            "right": lambda x: jnp.isclose(x[..., 0, 0], 1.0),
+            "top": lambda x: jnp.isclose(x[..., 0, 1], 1.0),
+            "left": lambda x: jnp.isclose(x[..., 0, 0], 0.0),
+        },
+    )

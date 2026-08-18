@@ -1,0 +1,47 @@
+[project]
+name = "jax-fem"
+version = "0.1.0"
+description = "A lightweight finite element library implemented with JAX."
+readme = "README.md"
+authors = [
+    { name = "Nicolas Zamorano", email = "nicolas.zamo12@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "jax>=0.10.2",
+]
+
+[project.optional-dependencies]
+gmsh = [
+    "gmsh>=4.15.2",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.4,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "gmsh>=4.15.2",
+    "pytest>=9.1.1",
+    "ruff>=0.16.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: isolated component tests",
+    "property: mathematical identity tests",
+    "integration: tests involving multiple components",
+    "end_to_end: complete finite-element solves",
+    "convergence: asymptotic convergence tests",
+    "jax: JAX transformation and dtype tests",
+    "slow: tests excluded from the fastest development run",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
