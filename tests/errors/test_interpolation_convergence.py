@@ -63,7 +63,9 @@ def test_interpolate_function_matches_dof_coordinates() -> None:
     function = interpolate_function(u, space)
     assert function.dof_values.shape == (4, 1)
     x, y = space.dof_coordinates[:, 0, 0], space.dof_coordinates[:, 0, 1]
-    assert jnp.allclose(function.dof_values[:, 0], 2.0 * x + 3.0 * y + 1.0)
+    assert jnp.allclose(
+        function.dof_values[:, 0], 2.0 * x + 3.0 * y + 1.0, atol=1e-14, rtol=1e-12
+    )
 
 
 @pytest.mark.unit
@@ -142,8 +144,12 @@ def test_polynomial_interpolation_exactness_on_physical_mesh(
     basis = create_cell_basis(space, quadrature)
     evaluation = evaluate_finite_element_function(function, basis)
 
-    assert jnp.allclose(evaluation.values, q(basis.physical_points))
-    assert jnp.allclose(evaluation.gradients, grad_q(basis.physical_points))
+    assert jnp.allclose(
+        evaluation.values, q(basis.physical_points), atol=1e-14, rtol=1e-12
+    )
+    assert jnp.allclose(
+        evaluation.gradients, grad_q(basis.physical_points), atol=1e-14, rtol=1e-12
+    )
 
 
 @pytest.mark.unit

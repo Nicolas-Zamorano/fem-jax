@@ -36,7 +36,7 @@ def test_integrate_cellwise_manual_example() -> None:
     result = integrate_cellwise(pointwise_values, physical_weights)
     expected = jnp.array([[[0.25 * 1.0 + 0.75 * 3.0], [0.25 * 2.0 + 0.75 * 4.0]]])
     assert result.shape == (1, 2, 1)
-    assert jnp.allclose(result, expected)
+    assert jnp.allclose(result, expected, atol=1e-14, rtol=1e-12)
 
 
 def _make_laplacian_basis():
@@ -72,9 +72,9 @@ def test_assemble_bilinear_form_matches_hand_derived_global_stiffness() -> None:
             [-0.5, 0.0, -0.5, 1.0],
         ]
     )
-    assert jnp.allclose(matrix.todense(), expected)
+    assert jnp.allclose(matrix.todense(), expected, atol=1e-14, rtol=1e-12)
     # Constant-function nullspace of the pure Laplacian.
-    assert jnp.allclose(jnp.sum(matrix.todense(), axis=-1), 0.0)
+    assert jnp.allclose(jnp.sum(matrix.todense(), axis=-1), 0.0, atol=1e-14)
 
 
 def test_assemble_linear_form_matches_hand_derived_global_load_vector() -> None:
@@ -93,7 +93,7 @@ def test_assemble_linear_form_matches_hand_derived_global_load_vector() -> None:
     assert vector.shape == (4, 1)
     # dof 0 and dof 2 are shared by both cells, dof 1 and dof 3 by one each.
     expected = jnp.array([[1.0 / 3.0], [1.0 / 6.0], [1.0 / 3.0], [1.0 / 6.0]])
-    assert jnp.allclose(vector, expected)
+    assert jnp.allclose(vector, expected, atol=1e-14, rtol=1e-12)
 
 
 def test_sparse_assembly_matches_independent_dense_scatter() -> None:
@@ -130,7 +130,7 @@ def test_sparse_assembly_matches_independent_dense_scatter() -> None:
                     local_matrices[cell_index, local_i, local_j]
                 )
 
-    assert jnp.allclose(matrix.todense(), dense_reference)
+    assert jnp.allclose(matrix.todense(), dense_reference, atol=1e-14, rtol=1e-12)
 
 
 def test_assembled_matrix_is_symmetric_for_symmetric_diffusion() -> None:
@@ -148,5 +148,5 @@ def test_assembled_matrix_is_symmetric_for_symmetric_diffusion() -> None:
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
     matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
     dense = matrix.todense()
-    assert jnp.allclose(dense, dense.T)
-    assert jnp.allclose(jnp.sum(dense, axis=-1), 0.0)
+    assert jnp.allclose(dense, dense.T, atol=1e-14, rtol=1e-12)
+    assert jnp.allclose(jnp.sum(dense, axis=-1), 0.0, atol=1e-14)

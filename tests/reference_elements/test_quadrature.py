@@ -28,7 +28,7 @@ def _exact_monomial_integral(i: int, j: int) -> float:
 @pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
 def test_weights_sum_to_one(requested_degree: int, reference_triangle) -> None:
     quadrature = reference_triangle.create_quadrature(requested_degree)
-    assert jnp.sum(quadrature.weights) == pytest.approx(1.0)
+    assert jnp.sum(quadrature.weights) == pytest.approx(1.0, abs=1e-14)
 
 
 @pytest.mark.unit
@@ -74,7 +74,7 @@ def test_exact_for_all_monomials_up_to_degree(
                 weights * x**i * y**j
             )
             expected = _exact_monomial_integral(i, j)
-            assert numerical == pytest.approx(expected, abs=1e-12), (i, j)
+            assert numerical == pytest.approx(expected, abs=1e-14), (i, j)
 
 
 @pytest.mark.unit

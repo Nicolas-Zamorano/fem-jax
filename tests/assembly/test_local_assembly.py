@@ -68,7 +68,7 @@ def test_exact_p1_reference_stiffness_matrix() -> None:
             [-0.5, 0.0, 0.5],
         ]
     )
-    assert jnp.allclose(stiffness, expected)
+    assert jnp.allclose(stiffness, expected, atol=1e-16, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -85,7 +85,7 @@ def test_exact_p1_reference_mass_matrix() -> None:
             [1.0, 1.0, 2.0],
         ]
     )
-    assert jnp.allclose(mass, expected)
+    assert jnp.allclose(mass, expected, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -105,7 +105,7 @@ def test_exact_p1_constant_load_vector() -> None:
 
     assert load_vector.shape == (3, 1)
     expected = (1.0 / 6.0) * jnp.ones((3, 1))
-    assert jnp.allclose(load_vector, expected)
+    assert jnp.allclose(load_vector, expected, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -117,10 +117,10 @@ def test_local_diffusion_matrix_properties(affine_triangle_vertices) -> None:
         basis, diffusion=_IDENTITY, advection=_ZERO_VECTOR, reaction=0.0
     )
 
-    assert jnp.allclose(stiffness, stiffness.T)
+    assert jnp.allclose(stiffness, stiffness.T, atol=1e-14, rtol=1e-12)
     eigenvalues = jnp.linalg.eigvalsh(stiffness)
-    assert jnp.all(eigenvalues >= -1e-10)
-    assert jnp.allclose(stiffness @ jnp.ones(3), 0.0, atol=1e-10)
+    assert jnp.all(eigenvalues >= -1e-12)
+    assert jnp.allclose(stiffness @ jnp.ones(3), 0.0, atol=1e-14)
 
 
 @pytest.mark.unit
@@ -132,7 +132,7 @@ def test_local_mass_matrix_properties(affine_triangle_vertices) -> None:
         basis, diffusion=_ZERO_TENSOR, advection=_ZERO_VECTOR, reaction=1.0
     )
 
-    assert jnp.allclose(mass, mass.T)
+    assert jnp.allclose(mass, mass.T, atol=1e-14, rtol=1e-12)
     eigenvalues = jnp.linalg.eigvalsh(mass)
     assert jnp.all(eigenvalues > 0.0)
 
@@ -158,5 +158,5 @@ def test_geometric_scaling() -> None:
     stiffness_base, mass_base = matrices(base_vertices)
     stiffness_scaled, mass_scaled = matrices(scaled_vertices)
 
-    assert jnp.allclose(stiffness_scaled, stiffness_base, atol=1e-9)
-    assert jnp.allclose(mass_scaled, scale**2 * mass_base, atol=1e-8)
+    assert jnp.allclose(stiffness_scaled, stiffness_base, atol=1e-13)
+    assert jnp.allclose(mass_scaled, scale**2 * mass_base, atol=1e-12)

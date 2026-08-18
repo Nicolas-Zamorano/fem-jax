@@ -213,4 +213,4 @@ def test_finite_element_function_is_continuous_across_shared_edge(
     trace_0 = basis_values_0.mT @ local_values_0  # (1, 5, 1, 1)
     trace_1 = basis_values_1.mT @ local_values_1
 
-    assert jnp.allclose(trace_0, trace_1, atol=1e-12)
+    assert jnp.allclose(trace_0, trace_1, atol=1e-14)

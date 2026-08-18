@@ -81,7 +81,7 @@ def _check_gradient_matches_autodiff(
     for point in points:
         autodiff_gradient = jax.grad(u_scalar)(point)
         hand_gradient = problem.exact_gradient(_as_batch(point))[0, 0]
-        assert jnp.allclose(autodiff_gradient, hand_gradient, atol=1e-6), point
+        assert jnp.allclose(autodiff_gradient, hand_gradient, atol=1e-9), point
 
 
 def _strong_form_residual(problem: EllipticProblem, point: jax.Array) -> jax.Array:
@@ -120,7 +120,7 @@ def _check_source_matches_strong_form(
     for point in points:
         autodiff_source = _strong_form_residual(problem, point)
         hand_source = problem.source(_as_batch(point))[0, 0, 0]
-        assert autodiff_source == pytest.approx(float(hand_source), abs=1e-5), point
+        assert autodiff_source == pytest.approx(float(hand_source), abs=1e-8), point
 
 
 @pytest.mark.unit
@@ -148,7 +148,7 @@ def test_dirichlet_values_equal_exact_solution_at_boundary(name: str) -> None:
     dofs, values = evaluate_dirichlet_dof_values(problem, space)
     coordinates = space.dof_coordinates[dofs]
     expected = problem.exact_solution(coordinates)[:, :, 0]
-    assert jnp.allclose(values, expected, atol=1e-10)
+    assert jnp.allclose(values, expected, atol=1e-14)
 
 
 def _solve(problem: EllipticProblem, space, basis) -> FiniteElementFunction:

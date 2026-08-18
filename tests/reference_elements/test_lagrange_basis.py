@@ -58,7 +58,7 @@ def test_nodal_property(p1_element: LagrangeTriangleP1) -> None:
         1, 3, 1, 2
     )
     values = p1_element.tabulate_basis_values(reference_vertices)  # (1, 3, 3, 1)
-    assert jnp.allclose(values[0, :, :, 0], jnp.eye(3))
+    assert jnp.allclose(values[0, :, :, 0], jnp.eye(3), atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -73,7 +73,7 @@ def test_partition_of_unity(p1_element: LagrangeTriangleP1) -> None:
     points = jnp.concatenate([deterministic_points, random_points], axis=1)
 
     values = p1_element.tabulate_basis_values(points)
-    assert jnp.allclose(jnp.sum(values, axis=2), 1.0)
+    assert jnp.allclose(jnp.sum(values, axis=2), 1.0, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -82,7 +82,7 @@ def test_gradients_sum_to_zero(p1_element: LagrangeTriangleP1) -> None:
     """REF-04: sum_i grad(phi_i) == 0."""
     points = jnp.zeros((1, 1, 1, 2))
     gradients = p1_element.tabulate_basis_gradients(points)
-    assert jnp.allclose(jnp.sum(gradients, axis=2), 0.0)
+    assert jnp.allclose(jnp.sum(gradients, axis=2), 0.0, atol=1e-14)
 
 
 @pytest.mark.unit
@@ -99,9 +99,17 @@ def test_exact_p1_basis_values_and_gradients(p1_element: LagrangeTriangleP1) -> 
     eta = points[..., 0, 1]
     expected_values = jnp.stack((1.0 - xi - eta, xi, eta), axis=-1)[..., None]
 
-    assert jnp.allclose(p1_element.tabulate_basis_values(points), expected_values)
     assert jnp.allclose(
-        p1_element.tabulate_basis_gradients(points), _CONSTANT_GRADIENTS
+        p1_element.tabulate_basis_values(points),
+        expected_values,
+        atol=1e-14,
+        rtol=1e-12,
+    )
+    assert jnp.allclose(
+        p1_element.tabulate_basis_gradients(points),
+        _CONSTANT_GRADIENTS,
+        atol=1e-14,
+        rtol=1e-12,
     )
 
 
@@ -119,7 +127,9 @@ def test_gradients_match_autodiff_of_values(p1_element: LagrangeTriangleP1) -> N
     tabulated_gradients = p1_element.tabulate_basis_gradients(
         points.reshape(1, 11, 1, 2)
     )  # (1, 1, 3, 2), constant: broadcasts against every one of the 11 points.
-    assert jnp.allclose(autodiff_gradients, tabulated_gradients[0, 0])
+    assert jnp.allclose(
+        autodiff_gradients, tabulated_gradients[0, 0], atol=1e-12, rtol=1e-10
+    )
 
 
 @pytest.mark.unit

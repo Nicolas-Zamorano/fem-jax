@@ -83,13 +83,13 @@ def test_eager_and_jit_agree_for_elliptic_forms() -> None:
     jitted_bilinear = jax.jit(elliptic_bilinear_form, static_argnums=(0,))(
         basis, coefficients
     )
-    assert jnp.allclose(eager_bilinear, jitted_bilinear)
+    assert jnp.allclose(eager_bilinear, jitted_bilinear, atol=1e-14, rtol=1e-12)
 
     eager_linear = elliptic_linear_form(basis, coefficients)
     jitted_linear = jax.jit(elliptic_linear_form, static_argnums=(0,))(
         basis, coefficients
     )
-    assert jnp.allclose(eager_linear, jitted_linear)
+    assert jnp.allclose(eager_linear, jitted_linear, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.jax
@@ -109,13 +109,15 @@ def test_eager_and_jit_agree_for_assembly() -> None:
     jitted_matrix = jax.jit(assemble_bilinear_form, static_argnums=(0, 1))(
         elliptic_bilinear_form, basis, coefficients
     )
-    assert jnp.allclose(eager_matrix.todense(), jitted_matrix.todense())
+    assert jnp.allclose(
+        eager_matrix.todense(), jitted_matrix.todense(), atol=1e-14, rtol=1e-12
+    )
 
     eager_vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
     jitted_vector = jax.jit(assemble_linear_form, static_argnums=(0, 1))(
         elliptic_linear_form, basis, coefficients
     )
-    assert jnp.allclose(eager_vector, jitted_vector)
+    assert jnp.allclose(eager_vector, jitted_vector, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.jax
@@ -136,8 +138,8 @@ def test_eager_and_jit_agree_for_function_evaluation() -> None:
     eager = evaluate(dof_values)
     jitted = jax.jit(evaluate)(dof_values)
 
-    assert jnp.allclose(eager.values, jitted.values)
-    assert jnp.allclose(eager.gradients, jitted.gradients)
+    assert jnp.allclose(eager.values, jitted.values, atol=1e-14, rtol=1e-12)
+    assert jnp.allclose(eager.gradients, jitted.gradients, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.jax
@@ -184,7 +186,9 @@ def test_python_loop_matches_batched_local_stiffness_assembly() -> None:
     looped_local_matrices = jnp.stack(looped_local_matrices)
 
     assert batched_local_matrices.shape == looped_local_matrices.shape
-    assert jnp.allclose(batched_local_matrices, looped_local_matrices)
+    assert jnp.allclose(
+        batched_local_matrices, looped_local_matrices, atol=1e-14, rtol=1e-12
+    )
 
 
 @pytest.mark.jax

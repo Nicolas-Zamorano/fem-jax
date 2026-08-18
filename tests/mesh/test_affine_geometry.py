@@ -73,7 +73,7 @@ def test_physical_points_at_reference_vertices_recover_mesh_vertices() -> None:
     basis = create_cell_basis(space, quadrature)
     recovered = basis.physical_points[0, :, 0, :]  # (3, 2)
     expected = jnp.asarray(_SKEWED_TRIANGLE_VERTICES)
-    assert jnp.allclose(recovered, expected)
+    assert jnp.allclose(recovered, expected, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -116,7 +116,7 @@ def test_forward_inverse_map_round_trip() -> None:
     # x_row = origin_row + xhat_row @ J^T  =>  xhat_row = (x - origin)_row @ (J^{-1})^T.
     recovered_reference_points = displacement @ basis.inverse_jacobians.mT
 
-    assert jnp.allclose(recovered_reference_points[0], reference_points[0], atol=1e-10)
+    assert jnp.allclose(recovered_reference_points[0], reference_points[0], atol=1e-14)
 
 
 @pytest.mark.unit
@@ -125,7 +125,7 @@ def test_physical_weights_sum_to_cell_area() -> None:
     quadrature = space.element.reference_cell.create_quadrature(3)
     basis = create_cell_basis(space, quadrature)
     cell_areas = jnp.sum(basis.physical_weights, axis=1)[:, 0, 0]
-    assert jnp.allclose(cell_areas, jnp.array([0.5, 0.5]))
+    assert jnp.allclose(cell_areas, jnp.array([0.5, 0.5]), atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -134,7 +134,7 @@ def test_physical_weights_sum_to_cell_area_skewed_triangle() -> None:
     quadrature = space.element.reference_cell.create_quadrature(1)
     basis = create_cell_basis(space, quadrature)
     cell_area = jnp.sum(basis.physical_weights)
-    assert cell_area == pytest.approx(3.0)
+    assert cell_area == pytest.approx(3.0, abs=1e-12)
 
 
 @pytest.mark.unit
@@ -143,7 +143,7 @@ def test_jacobian_determinant_matches_twice_area_over_reference_measure() -> Non
     quadrature = space.element.reference_cell.create_quadrature(1)
     basis = create_cell_basis(space, quadrature)
     # area = reference_measure * |det J| => |det J| = 3 / 0.5 = 6.
-    assert jnp.allclose(basis.jacobian_determinants, 6.0)
+    assert jnp.allclose(basis.jacobian_determinants, 6.0, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -172,6 +172,8 @@ def test_clockwise_triangle_is_not_rejected_but_flips_sign() -> None:
     assert jnp.allclose(
         jnp.abs(ccw_basis.jacobian_determinants),
         jnp.abs(cw_basis.jacobian_determinants),
+        atol=1e-14,
+        rtol=1e-12,
     )
     # A real, user-visible consequence: physical_weights go negative too.
     assert jnp.all(cw_basis.physical_weights < 0)
@@ -184,7 +186,7 @@ def test_inverse_jacobians_are_true_inverses() -> None:
     basis = create_cell_basis(space, quadrature)
     identity = jnp.broadcast_to(jnp.eye(2), basis.jacobians.shape)
     assert jnp.allclose(
-        basis.jacobians @ basis.inverse_jacobians, identity, atol=1e-10
+        basis.jacobians @ basis.inverse_jacobians, identity, atol=1e-14
     )
 
 
@@ -211,7 +213,7 @@ def test_physical_gradient_transformation_independent_solve() -> None:
     solved_transpose = jnp.linalg.solve(jacobian.mT, reference_gradients.mT)  # (2, 3)
     expected_gradients = solved_transpose.mT  # (3, 2)
 
-    assert jnp.allclose(basis.gradients[0, 0], expected_gradients, atol=1e-10)
+    assert jnp.allclose(basis.gradients[0, 0], expected_gradients, atol=1e-14)
 
 
 @pytest.mark.unit
@@ -235,8 +237,12 @@ def test_gradient_and_value_reconstruction_of_affine_function() -> None:
     gradients = local_dof_values_row.mT @ basis.gradients  # (K, 1, 1, d)
 
     expected_values = u(basis.physical_points)  # (K, Q, 1)
-    assert jnp.allclose(values[..., 0, 0], expected_values[..., 0])
-    assert jnp.allclose(gradients[..., 0, :], jnp.asarray([a, b]))
+    assert jnp.allclose(
+        values[..., 0, 0], expected_values[..., 0], atol=1e-14, rtol=1e-12
+    )
+    assert jnp.allclose(
+        gradients[..., 0, :], jnp.asarray([a, b]), atol=1e-14, rtol=1e-12
+    )
 
 
 @pytest.mark.unit
@@ -245,4 +251,4 @@ def test_values_partition_of_unity() -> None:
     space = _make_space(_UNIT_SQUARE_VERTICES, _UNIT_SQUARE_CELLS)
     quadrature = space.element.reference_cell.create_quadrature(4)
     basis = create_cell_basis(space, quadrature)
-    assert jnp.allclose(jnp.sum(basis.values, axis=2), 1.0)
+    assert jnp.allclose(jnp.sum(basis.values, axis=2), 1.0, atol=1e-14, rtol=1e-12)

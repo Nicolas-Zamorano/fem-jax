@@ -78,13 +78,13 @@ def test_affine_patch_test(four_triangle_center_vertex_mesh, p1_element) -> None
     solution = FiniteElementFunction(space=space, dof_values=full_dof_values)
 
     expected = interpolate_function(u_exact, space)
-    assert jnp.allclose(solution.dof_values, expected.dof_values, atol=1e-9)
+    assert jnp.allclose(solution.dof_values, expected.dof_values, atol=1e-11)
 
     solution_evaluation = evaluate_finite_element_function(solution, basis)
     expected_values = u_exact(basis.physical_points)
-    assert jnp.allclose(solution_evaluation.values, expected_values, atol=1e-9)
+    assert jnp.allclose(solution_evaluation.values, expected_values, atol=1e-11)
     expected_gradients = jnp.asarray([2.0, -3.0])
-    assert jnp.allclose(solution_evaluation.gradients, expected_gradients, atol=1e-9)
+    assert jnp.allclose(solution_evaluation.gradients, expected_gradients, atol=1e-11)
 
 
 @pytest.mark.integration
@@ -128,4 +128,4 @@ def test_affine_patch_test_holds_under_refinement(resolution: int) -> None:
     full_dof_values = expand_condensed_solution(free_dof_values, condensed)
 
     expected = interpolate_function(u_exact, space)
-    assert jnp.allclose(full_dof_values, expected.dof_values, atol=1e-8)
+    assert jnp.allclose(full_dof_values, expected.dof_values, atol=1e-10)
