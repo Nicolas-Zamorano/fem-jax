@@ -15,6 +15,9 @@ dependencies = [
 gmsh = [
     "gmsh>=4.15.2",
 ]
+plotting = [
+    "matplotlib>=3.11.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.4,<0.13.0"]
@@ -23,6 +26,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "gmsh>=4.15.2",
+    "matplotlib>=3.11.1",
     "pytest>=9.1.1",
     "ruff>=0.16.3",
 ]

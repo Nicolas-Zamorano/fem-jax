@@ -61,14 +61,13 @@ def create_poisson_sin_sin_problem(mesh: TriangleMesh) -> EllipticProblem:
     vanishes identically on the whole boundary.
     """
     return EllipticProblem(
+        name="poisson_sin_sin",
         diffusion=constant_tensor_coefficient(_IDENTITY_2X2),
         advection=constant_vector_coefficient(_ZERO_VECTOR_2),
         reaction=constant_scalar_coefficient(0.0),
         source=_poisson_sin_sin_source,
         dirichlet_conditions=(
-            create_full_boundary_dirichlet_condition(
-                mesh, _poisson_sin_sin_solution
-            ),
+            create_full_boundary_dirichlet_condition(mesh, _poisson_sin_sin_solution),
         ),
         exact_solution=_poisson_sin_sin_solution,
         exact_gradient=_poisson_sin_sin_gradient,
@@ -104,14 +103,13 @@ def create_poisson_cos_sin_problem(mesh: TriangleMesh) -> EllipticProblem:
     ``-Laplacian(u) = f``, with ``A = I``, ``beta = 0``, ``c = 0``.
     """
     return EllipticProblem(
+        name="poisson_cos_sin",
         diffusion=constant_tensor_coefficient(_IDENTITY_2X2),
         advection=constant_vector_coefficient(_ZERO_VECTOR_2),
         reaction=constant_scalar_coefficient(0.0),
         source=_poisson_cos_sin_source,
         dirichlet_conditions=(
-            create_full_boundary_dirichlet_condition(
-                mesh, _poisson_cos_sin_solution
-            ),
+            create_full_boundary_dirichlet_condition(mesh, _poisson_cos_sin_solution),
         ),
         exact_solution=_poisson_cos_sin_solution,
         exact_gradient=_poisson_cos_sin_gradient,
@@ -128,9 +126,7 @@ def _make_poisson_exponential_functions(scaling: float, exponential_constant: fl
 
     def solution(points: jax.Array) -> jax.Array:
         x, y = points[..., 0], points[..., 1]
-        values = (
-            scaling * x * y * (1.0 - x) * (1.0 - y) * (jnp.exp(k * x) - 1.0)
-        )
+        values = scaling * x * y * (1.0 - x) * (1.0 - y) * (jnp.exp(k * x) - 1.0)
         return values[..., None]
 
     def gradient(points: jax.Array) -> jax.Array:
@@ -141,8 +137,7 @@ def _make_poisson_exponential_functions(scaling: float, exponential_constant: fl
         one_y = 1.0 - y
 
         grad_x = scaling * (
-            y * one_y * (1.0 - 2.0 * x) * exm1
-            + x * y * one_x * one_y * k * exp_kx
+            y * one_y * (1.0 - 2.0 * x) * exm1 + x * y * one_x * one_y * k * exp_kx
         )
         grad_y = scaling * (x * one_x * (1.0 - 2.0 * y) * exm1)
         return jnp.stack((grad_x, grad_y), axis=-1)
@@ -187,6 +182,7 @@ def create_poisson_exponential_problem(
         scaling, exponential_constant
     )
     return EllipticProblem(
+        name="poisson_exponential",
         diffusion=constant_tensor_coefficient(_IDENTITY_2X2),
         advection=constant_vector_coefficient(_ZERO_VECTOR_2),
         reaction=constant_scalar_coefficient(0.0),
@@ -252,14 +248,13 @@ def create_poisson_singular_problem(mesh: TriangleMesh) -> EllipticProblem:
     though its gradient does not.
     """
     return EllipticProblem(
+        name="poisson_singular",
         diffusion=constant_tensor_coefficient(_IDENTITY_2X2),
         advection=constant_vector_coefficient(_ZERO_VECTOR_2),
         reaction=constant_scalar_coefficient(0.0),
         source=constant_scalar_coefficient(0.0),
         dirichlet_conditions=(
-            create_full_boundary_dirichlet_condition(
-                mesh, _poisson_singular_solution
-            ),
+            create_full_boundary_dirichlet_condition(mesh, _poisson_singular_solution),
         ),
         exact_solution=_poisson_singular_solution,
         exact_gradient=_poisson_singular_gradient,
@@ -300,13 +295,8 @@ def _simple_elliptic_gradient(points: jax.Array) -> jax.Array:
 def _simple_elliptic_laplacian(points: jax.Array) -> jax.Array:
     x, y = points[..., 0], points[..., 1]
     uxx = (
-        -((6.4 * x - 3.2 * y) ** 2)
-        * jnp.sin(3.2 * x * (x - y))
-        * jnp.cos(x + 4.3 * y)
-        - 2.0
-        * (6.4 * x - 3.2 * y)
-        * jnp.sin(x + 4.3 * y)
-        * jnp.cos(3.2 * x * (x - y))
+        -((6.4 * x - 3.2 * y) ** 2) * jnp.sin(3.2 * x * (x - y)) * jnp.cos(x + 4.3 * y)
+        - 2.0 * (6.4 * x - 3.2 * y) * jnp.sin(x + 4.3 * y) * jnp.cos(3.2 * x * (x - y))
         - jnp.sin(3.2 * x * (x - y)) * jnp.cos(x + 4.3 * y)
         - 48.2 * jnp.sin(4.6 * x + 9.2 * y) * jnp.cos(5.2 * x - 2.6 * y)
         - 47.84 * jnp.sin(5.2 * x - 2.6 * y) * jnp.cos(4.6 * x + 9.2 * y)
@@ -380,14 +370,13 @@ def create_simple_elliptic_problem(mesh: TriangleMesh) -> EllipticProblem:
     Dirichlet BC equal to the exact solution.
     """
     return EllipticProblem(
+        name="simple_elliptic_problem",
         diffusion=isotropic_tensor_coefficient(_simple_elliptic_diffusion_scalar),
         advection=_simple_elliptic_advection,
         reaction=_simple_elliptic_reaction,
         source=_simple_elliptic_source,
         dirichlet_conditions=(
-            create_full_boundary_dirichlet_condition(
-                mesh, _simple_elliptic_solution
-            ),
+            create_full_boundary_dirichlet_condition(mesh, _simple_elliptic_solution),
         ),
         exact_solution=_simple_elliptic_solution,
         exact_gradient=_simple_elliptic_gradient,

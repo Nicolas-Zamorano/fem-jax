@@ -43,6 +43,8 @@ class EllipticProblem:
 
     Attributes
     ----------
+    name : str
+        Name of the problem
     diffusion:
         ``A(x)``, a ``TensorCoefficient``.
     advection:
@@ -75,6 +77,7 @@ class EllipticProblem:
     exact_solution: ScalarCoefficient | None = None
     exact_gradient: VectorCoefficient | None = None
     advection_divergence: ScalarCoefficient | None = None
+    name: str = "elliptic_problem"
 
 
 class EllipticCoefficientValues(NamedTuple):
@@ -152,9 +155,7 @@ def constant_vector_coefficient(vector: jax.Array) -> VectorCoefficient:
 
     def coefficient(points: jax.Array) -> jax.Array:
         dimension = points.shape[-1]
-        return jnp.broadcast_to(
-            jnp.asarray(vector), points.shape[:-2] + (1, dimension)
-        )
+        return jnp.broadcast_to(jnp.asarray(vector), points.shape[:-2] + (1, dimension))
 
     return coefficient
 

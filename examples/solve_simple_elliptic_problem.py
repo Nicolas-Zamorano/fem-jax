@@ -22,7 +22,13 @@ from jax_fem.constraints import (
     evaluate_dirichlet_dof_values,
     expand_condensed_solution,
 )
-from jax_fem.diagnostics import compute_h1_seminorm_error, compute_l2_error
+from jax_fem.diagnostics import (
+    compute_h1_seminorm_error,
+    compute_l2_error,
+    plot_fem_error,
+    plot_fem_error_3d,
+    save_plots,
+)
 from jax_fem.element import LagrangeTriangleP1
 from jax_fem.forms import elliptic_bilinear_form, elliptic_linear_form
 from jax_fem.function import FiniteElementFunction
@@ -35,7 +41,7 @@ from jax_fem.reference_cell import ReferenceTriangle
 from jax_fem.space import create_cell_basis, create_finite_element_space
 
 
-def main(resolution: int = 24) -> None:
+def main(resolution: int = 30) -> None:
 
     mesh = create_structured_unit_square_mesh(resolution)
 
@@ -45,7 +51,6 @@ def main(resolution: int = 24) -> None:
 
     quadrature = space.element.reference_cell.create_quadrature(5)
     basis = create_cell_basis(space, quadrature)
-
 
     problem = create_simple_elliptic_problem(mesh)
 
@@ -58,7 +63,6 @@ def main(resolution: int = 24) -> None:
         matrix, vector, dirichlet_dofs, dirichlet_values
     )
 
-
     free_dof_values = jnp.linalg.solve(condensed.matrix.todense(), condensed.vector)
 
     full_dof_values = expand_condensed_solution(free_dof_values, condensed)
@@ -67,12 +71,26 @@ def main(resolution: int = 24) -> None:
     l2_error = float(compute_l2_error(solution, basis, problem))
     h1_error = float(compute_h1_seminorm_error(solution, basis, problem))
 
+    error_figure = plot_fem_error(solution, basis, problem, mesh)
+
+    figure_3d = plot_fem_error_3d(solution, basis, problem, mesh)
+
+    directory = save_plots(
+        {"error_mesh": error_figure, "error_mesh_3d": figure_3d},
+        directory="experiments",
+        name=problem.name,
+    )
+
     number_of_cells = mesh.cells_to_vertices.shape[0]
     print(f"resolution:         {resolution} x {resolution} ({number_of_cells} cells)")
-    print(f"degrees of freedom: {space.number_of_dofs} total, "
-          f"{condensed.free_dofs.shape[0]} free")
+    print(
+        f"degrees of freedom: {space.number_of_dofs} total, "
+        f"{condensed.free_dofs.shape[0]} free"
+    )
     print(f"L2 error:           {l2_error:.6e}")
     print(f"H1 seminorm error:  {h1_error:.6e}")
+
+    print("Plots saved to ", directory)
 
 
 if __name__ == "__main__":
