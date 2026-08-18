@@ -13,6 +13,7 @@ from jax_fem.diagnostics.norms import (
     h1_seminorm_error_density,
     l2_error_density,
 )
+from jax_fem.diagnostics.plotting import plot_fem_error, plot_fem_error_3d, save_plots
 
 __all__ = [
     "compute_l2_error",
@@ -22,4 +23,7 @@ __all__ = [
     "l2_error_density",
     "h1_seminorm_error_density",
     "energy_error_density",
+    "plot_fem_error",
+    "plot_fem_error_3d",
+    "save_plots",
 ]

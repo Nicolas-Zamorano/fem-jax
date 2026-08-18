@@ -23,6 +23,7 @@ def _integrated_norm(
     solution: FiniteElementFunction,
     basis: CellBasis,
     problem: EllipticProblem,
+    reduce: bool = True,
 ) -> jax.Array:
     """
     Integrate a squared-error density over the mesh and take its square root.
@@ -37,20 +38,30 @@ def _integrated_norm(
         The cell basis.
     problem : EllipticProblem
         The elliptic problem.
+    reduce : bool
+        Whether to sum the error over all cells (i.e., compute
+        the global error) or return the cell-wise error.
 
     Returns
     -------
     jax.Array
-        The integrated norm, shape ``()``.
+        The integrated norm, shape ``()`` or ``(K,)``.
     """
     fields = {"solution": evaluate_finite_element_function(solution, basis)}
-    pointwise = squared_density(basis, fields, problem) 
-    cellwise = integrate_cellwise(pointwise, basis.physical_weights) 
-    return jnp.sqrt(jnp.sum(cellwise))
+    pointwise = squared_density(basis, fields, problem)
+    cellwise = integrate_cellwise(pointwise, basis.physical_weights)
+
+    if reduce:
+        return jnp.sqrt(jnp.sum(cellwise))
+    else:
+        return jnp.sqrt(cellwise)
 
 
 def compute_l2_error(
-    solution: FiniteElementFunction, basis: CellBasis, problem: EllipticProblem
+    solution: FiniteElementFunction,
+    basis: CellBasis,
+    problem: EllipticProblem,
+    reduce: bool = True,
 ) -> jax.Array:
     """
     Absolute L2 error ``||u_h - u_exact||_{L2(Omega)}``.
@@ -63,17 +74,22 @@ def compute_l2_error(
         The cell basis.
     problem : EllipticProblem
         The elliptic problem, requires ``problem.exact_solution``.
+    reduce : bool
+        Whether to sum the error over all cells (i.e., compute
+        the global error) or return the cell-wise error.
 
     Returns
     -------
     l2_error : jax.Array
-        The absolute L2 error, shape ``()``.
+        The absolute L2 error, shape ``()`` or ``(K,)``.
     """
-    return _integrated_norm(l2_error_density, solution, basis, problem)
+    return _integrated_norm(l2_error_density, solution, basis, problem, reduce)
 
 
 def compute_relative_l2_error(
-    solution: FiniteElementFunction, basis: CellBasis, problem: EllipticProblem
+    solution: FiniteElementFunction,
+    basis: CellBasis,
+    problem: EllipticProblem,
 ) -> jax.Array:
     """
     Relative L2 error ``||u_h - u_exact||_{L2} / ||u_exact||_{L2}``.
@@ -105,7 +121,10 @@ def compute_relative_l2_error(
 
 
 def compute_h1_seminorm_error(
-    solution: FiniteElementFunction, basis: CellBasis, problem: EllipticProblem
+    solution: FiniteElementFunction,
+    basis: CellBasis,
+    problem: EllipticProblem,
+    reduce: bool = True,
 ) -> jax.Array:
     """
     H1-seminorm error ``|u_h - u_exact|_{H1} = ||grad(u_h - u_exact)||_{L2}``.
@@ -118,17 +137,23 @@ def compute_h1_seminorm_error(
         The cell basis.
     problem : EllipticProblem
         The elliptic problem, requires ``problem.exact_gradient``.
+    reduce : bool
+        Whether to sum the error over all cells (i.e., compute
+        the global error) or return the cell-wise error.
 
     Returns
     -------
     h1_seminorm_error : jax.Array
-        The H1-seminorm error, shape ``()``.
+        The H1-seminorm error, shape ``()`` or ``(K,)``.
     """
-    return _integrated_norm(h1_seminorm_error_density, solution, basis, problem)
+    return _integrated_norm(h1_seminorm_error_density, solution, basis, problem, reduce)
 
 
 def compute_energy_error(
-    solution: FiniteElementFunction, basis: CellBasis, problem: EllipticProblem
+    solution: FiniteElementFunction,
+    basis: CellBasis,
+    problem: EllipticProblem,
+    reduce: bool = True,
 ) -> jax.Array:
     """
     Energy error associated with the diffusion operator's principal part.
@@ -141,10 +166,13 @@ def compute_energy_error(
         The cell basis.
     problem : EllipticProblem
         The elliptic problem, requires ``problem.exact_gradient``.
+    reduce : bool
+        Whether to sum the error over all cells (i.e., compute
+        the global error) or return the cell-wise error.
 
     Returns
     -------
     energy_error : jax.Array
-        The energy error, shape ``()``.
+        The energy error, shape ``()`` or ``(K,)``.
     """
-    return _integrated_norm(energy_error_density, solution, basis, problem)
+    return _integrated_norm(energy_error_density, solution, basis, problem, reduce)
