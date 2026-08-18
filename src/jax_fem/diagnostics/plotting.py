@@ -2,18 +2,36 @@
 Plotting Module.
 """
 
+from __future__ import annotations
+
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
 
 from jax_fem.diagnostics import compute_energy_error, compute_l2_error
 from jax_fem.function import FiniteElementFunction
 from jax_fem.mesh import TriangleMesh
 from jax_fem.problem import EllipticProblem
 from jax_fem.space import CellBasis
+
+if TYPE_CHECKING:
+    from matplotlib.figure import Figure
+
+
+def _import_pyplot():
+    """
+    Import ``matplotlib.pyplot``, raising a friendly error if unavailable.
+    """
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as error:
+        raise ImportError(
+            "Plotting requires the optional 'matplotlib' dependency. "
+            "Install it with: pip install 'jax-fem[plotting]'."
+        ) from error
+    return plt
 
 
 def save_plots(
@@ -84,6 +102,8 @@ def plot_fem_error(
     figure : Figure
         The figure containing the plots.
     """
+    plt = _import_pyplot()
+
     cell_energy_error = compute_energy_error(solution, basis, problem, reduce=False)
     cell_l2_error = compute_l2_error(solution, basis, problem, reduce=False)
 
@@ -170,6 +190,8 @@ def plot_fem_error_3d(
     figure : Figure
         The figure containing the plots.
     """
+    plt = _import_pyplot()
+
     exact = problem.exact_solution(mesh.vertex_coordinates[:, 0, :])
 
     absolute_error = abs(solution.dof_values - exact)
