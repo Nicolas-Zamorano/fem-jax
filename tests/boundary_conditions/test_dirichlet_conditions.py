@@ -103,7 +103,7 @@ def test_evaluate_dirichlet_dof_values_single_condition() -> None:
     dofs, values = evaluate_dirichlet_dof_values(problem, space)
     # No interior vertex in this 2-triangle mesh: all 4 dofs are boundary.
     assert jnp.array_equal(dofs, jnp.arange(4))
-    assert jnp.allclose(values, 7.0)
+    assert jnp.allclose(values, 7.0, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -134,7 +134,7 @@ def test_boundary_values_match_nonlinear_function_at_dof_coordinates() -> None:
     dofs, values = evaluate_dirichlet_dof_values(problem, space)
     coordinates = space.dof_coordinates[dofs]
     expected = g(coordinates)[:, :, 0]
-    assert jnp.allclose(values, expected)
+    assert jnp.allclose(values, expected, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -159,9 +159,10 @@ def test_evaluate_dirichlet_dof_values_first_condition_wins() -> None:
     )
     dofs, values = evaluate_dirichlet_dof_values(problem, space)
     dof_to_value = dict(zip(dofs.tolist(), values[:, 0].tolist(), strict=True))
-    assert dof_to_value[0] == pytest.approx(1.0)  # bottom (listed first) wins
-    assert dof_to_value[3] == pytest.approx(2.0)  # left-only vertex (0, 1)
-    assert dof_to_value[1] == pytest.approx(1.0)  # bottom-only vertex (1, 0)
+    # bottom (listed first) wins
+    assert dof_to_value[0] == pytest.approx(1.0, abs=1e-12)
+    assert dof_to_value[3] == pytest.approx(2.0, abs=1e-12)  # left-only vertex (0, 1)
+    assert dof_to_value[1] == pytest.approx(1.0, abs=1e-12)  # bottom-only vertex (1, 0)
 
 
 def _make_laplacian_matrix_and_vector():
@@ -202,8 +203,10 @@ def test_condense_dirichlet_system_matches_hand_derivation() -> None:
     # A_fc @ [2,3] = [-1.5, -1.0]; b_f - A_fc@g_c = [1/3+1.5, 1/6+1.0].
     expected_matrix = jnp.array([[1.0, -0.5], [-0.5, 1.0]])
     expected_vector = jnp.array([[1.0 / 3.0 + 1.5], [1.0 / 6.0 + 1.0]])
-    assert jnp.allclose(condensed.matrix.todense(), expected_matrix)
-    assert jnp.allclose(condensed.vector, expected_vector)
+    assert jnp.allclose(
+        condensed.matrix.todense(), expected_matrix, atol=1e-14, rtol=1e-12
+    )
+    assert jnp.allclose(condensed.vector, expected_vector, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -219,7 +222,9 @@ def test_expand_condensed_solution_round_trip() -> None:
     full = expand_condensed_solution(free_dof_values, condensed)
 
     assert full.shape == (4, 1)
-    assert jnp.allclose(full, jnp.array([[2.0], [3.0], [10.0], [20.0]]))
+    assert jnp.allclose(
+        full, jnp.array([[2.0], [3.0], [10.0], [20.0]]), atol=1e-14, rtol=1e-12
+    )
 
 @pytest.mark.unit
 @pytest.mark.end_to_end
@@ -235,4 +240,4 @@ def test_solved_solution_recovers_prescribed_dirichlet_values() -> None:
     free_dof_values = jnp.linalg.solve(condensed.matrix.todense(), condensed.vector)
     full = expand_condensed_solution(free_dof_values, condensed)
 
-    assert jnp.allclose(full[dirichlet_dofs], dirichlet_values)
+    assert jnp.allclose(full[dirichlet_dofs], dirichlet_values, atol=1e-12)

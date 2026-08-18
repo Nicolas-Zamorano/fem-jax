@@ -79,15 +79,15 @@ def test_errors_vanish_when_solution_equals_exact_affine_function() -> None:
 
     solution = interpolate_function(u_exact, space)  # P1 represents affine u exactly
 
-    assert compute_l2_error(solution, basis, problem) == pytest.approx(0.0, abs=1e-10)
+    assert compute_l2_error(solution, basis, problem) == pytest.approx(0.0, abs=1e-14)
     assert compute_relative_l2_error(solution, basis, problem) == pytest.approx(
-        0.0, abs=1e-10
+        0.0, abs=1e-14
     )
     assert compute_h1_seminorm_error(solution, basis, problem) == pytest.approx(
-        0.0, abs=1e-10
+        0.0, abs=1e-14
     )
     assert compute_energy_error(solution, basis, problem) == pytest.approx(
-        0.0, abs=1e-10
+        0.0, abs=1e-14
     )
 
 
@@ -118,8 +118,10 @@ def test_l2_norm_of_constant_one_on_unit_square() -> None:
     )
     solution = interpolate_function(_affine_u(0.0, 0.0, 0.0), space)
 
-    assert compute_l2_error(solution, basis, problem) == pytest.approx(1.0)
-    assert compute_relative_l2_error(solution, basis, problem) == pytest.approx(1.0)
+    assert compute_l2_error(solution, basis, problem) == pytest.approx(1.0, abs=1e-13)
+    assert compute_relative_l2_error(solution, basis, problem) == pytest.approx(
+        1.0, abs=1e-13
+    )
 
 
 @pytest.mark.unit
@@ -137,7 +139,7 @@ def test_h1_seminorm_of_x_plus_2y_on_unit_square() -> None:
     solution = interpolate_function(_affine_u(0.0, 0.0, 0.0), space)
 
     assert compute_h1_seminorm_error(solution, basis, problem) == pytest.approx(
-        5.0**0.5
+        5.0**0.5, abs=1e-13
     )
 
 
@@ -158,14 +160,14 @@ def test_cellwise_and_global_error_consistency() -> None:
     cellwise_l2_squared = integrate_cellwise(l2_density, basis.physical_weights)
     global_l2 = compute_l2_error(solution, basis, problem)
     assert float(jnp.sum(cellwise_l2_squared)) == pytest.approx(
-        float(global_l2) ** 2, rel=1e-10
+        float(global_l2) ** 2, rel=1e-14
     )
 
     h1_density = h1_seminorm_error_density(basis, fields, problem)
     cellwise_h1_squared = integrate_cellwise(h1_density, basis.physical_weights)
     global_h1 = compute_h1_seminorm_error(solution, basis, problem)
     assert float(jnp.sum(cellwise_h1_squared)) == pytest.approx(
-        float(global_h1) ** 2, rel=1e-10
+        float(global_h1) ** 2, rel=1e-14
     )
 
 

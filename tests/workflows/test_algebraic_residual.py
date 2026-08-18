@@ -76,7 +76,7 @@ def test_condensed_system_residual_is_small_relative_to_problem_scale() -> None:
     )
     relative_residual = residual_norm / scale
 
-    assert relative_residual < 1e-10
+    assert relative_residual < 1e-13
 
 
 @pytest.mark.integration
@@ -97,4 +97,4 @@ def test_original_system_residual_vanishes_only_on_free_dofs() -> None:
     full = expand_condensed_solution(free_dof_values, condensed)
 
     residual = matrix @ full - vector
-    assert jnp.allclose(residual[condensed.free_dofs], 0.0, atol=1e-10)
+    assert jnp.allclose(residual[condensed.free_dofs], 0.0, atol=1e-12)

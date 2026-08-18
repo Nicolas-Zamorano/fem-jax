@@ -76,11 +76,11 @@ def test_energy_identity_matches_bilinear_form_and_hard_coded_value(
         (v_h.dof_values.T @ (matrix @ v_h.dof_values))[0, 0]
     )
 
-    assert energy_norm_squared_via_functional == pytest.approx(25.0 / 6.0, rel=1e-6)
+    assert energy_norm_squared_via_functional == pytest.approx(25.0 / 6.0, rel=1e-12)
     assert energy_norm_squared_via_bilinear_form == pytest.approx(
-        25.0 / 6.0, rel=1e-6
+        25.0 / 6.0, rel=1e-12
     )
     assert energy_norm_squared_via_functional == pytest.approx(
-        energy_norm_squared_via_bilinear_form, rel=1e-6
+        energy_norm_squared_via_bilinear_form, rel=1e-12
     )
     assert energy_norm_squared_via_functional >= 0.0

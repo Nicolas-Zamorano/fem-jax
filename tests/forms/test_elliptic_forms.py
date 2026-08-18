@@ -69,9 +69,9 @@ def test_evaluate_elliptic_coefficients_shapes_and_values() -> None:
     assert coefficients.reaction.shape == (k, q, 1, 1)
     assert coefficients.source.shape == (k, q, 1, 1)
 
-    assert jnp.allclose(coefficients.diffusion, jnp.eye(2))
-    assert jnp.allclose(coefficients.reaction, 2.0)
-    assert jnp.allclose(coefficients.source, 5.0)
+    assert jnp.allclose(coefficients.diffusion, jnp.eye(2), atol=1e-14, rtol=1e-12)
+    assert jnp.allclose(coefficients.reaction, 2.0, atol=1e-14, rtol=1e-12)
+    assert jnp.allclose(coefficients.source, 5.0, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -112,7 +112,7 @@ def test_advection_term_matches_hand_derivation() -> None:
     # independent of i since every P1 hat function integrates to area/3.
     beta_dot_grad = jnp.array([-beta[0] - beta[1], beta[0], beta[1]])
     expected = jnp.outer(jnp.full(3, _AREA / 3.0), beta_dot_grad)
-    assert jnp.allclose(local_matrix, expected)
+    assert jnp.allclose(local_matrix, expected, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -133,7 +133,7 @@ def test_reaction_global_matrix_equals_c_times_mass_matrix() -> None:
     mass_matrix = (_AREA / 12.0) * jnp.array(
         [[2.0, 1.0, 1.0], [1.0, 2.0, 1.0], [1.0, 1.0, 2.0]]
     )
-    assert jnp.allclose(reaction_matrix, c * mass_matrix)
+    assert jnp.allclose(reaction_matrix, c * mass_matrix, atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
@@ -209,7 +209,7 @@ def test_anisotropic_diffusion_affine_patch_test(
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
     matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
     vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
-    assert jnp.allclose(matrix.todense(), matrix.todense().T)
+    assert jnp.allclose(matrix.todense(), matrix.todense().T, atol=1e-14, rtol=1e-12)
 
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
@@ -218,4 +218,4 @@ def test_anisotropic_diffusion_affine_patch_test(
     free_dof_values = jnp.linalg.solve(condensed.matrix.todense(), condensed.vector)
     full_dof_values = expand_condensed_solution(free_dof_values, condensed)
     expected = u_exact(space.dof_coordinates)[:, :, 0]
-    assert jnp.allclose(full_dof_values, expected, atol=1e-9)
+    assert jnp.allclose(full_dof_values, expected, atol=1e-11)
