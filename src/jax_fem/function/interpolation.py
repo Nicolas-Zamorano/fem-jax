@@ -5,7 +5,6 @@ Nodal interpolation into a finite element space.
 from __future__ import annotations
 
 from jax_fem._shapes import check_shape
-from jax_fem.element.lagrange_triangle import LagrangeTriangleP1
 from jax_fem.function.finite_element_function import FiniteElementFunction
 from jax_fem.problem.elliptic import ScalarCoefficient
 from jax_fem.space.finite_element_space import FiniteElementSpace
@@ -16,7 +15,13 @@ def interpolate_function(
 ) -> FiniteElementFunction:
     """
     Interpolate a scalar physical function into a finite element space.
-    
+
+    Generic over any nodal element (``space.element.is_nodal``, e.g.
+    ``LagrangeTriangleP1`` or ``LagrangeTriangleP2``): every DOF is a point
+    evaluation at its ``space.dof_coordinates`` entry, so interpolation is
+    just evaluating ``function`` there directly, independent of element
+    degree.
+
     Parameters
     ----------
     function : ScalarCoefficient
@@ -30,12 +35,12 @@ def interpolate_function(
     FiniteElementFunction
         ``dof_values`` has shape ``(N_dofs, 1)``.
     """
-    if not isinstance(space.element, LagrangeTriangleP1):
+    if not space.element.is_nodal:
         raise NotImplementedError(
-            "interpolate_function currently only supports nodal "
-            "interpolation for LagrangeTriangleP1. Future non-nodal "
-            "elements will interpolate via their own interpolation "
-            "functionals (Section 11.3)."
+            "interpolate_function only supports nodal elements "
+            "(element.is_nodal == True). A non-nodal element (e.g. a "
+            "future H(div) element with edge-flux-moment DOFs) requires "
+            "its own interpolation functionals (Section 11.3)."
         )
 
     values = function(space.dof_coordinates)
