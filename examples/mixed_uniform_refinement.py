@@ -35,8 +35,9 @@ from jax_fem.diagnostics import (
     compute_flux_divergence_l2_error,
     compute_flux_l2_error,
     compute_l2_error,
+    create_timestamped_output_directory,
     plot_mixed_solution,
-    save_plots,
+    save_plot,
 )
 from jax_fem.element import PiecewiseConstantTriangleP0, RaviartThomasTriangleRT0
 from jax_fem.function import FiniteElementFunction, evaluate_finite_element_function
@@ -128,7 +129,9 @@ def _solve_level(n: int):
     )
 
     flux_error = float(compute_flux_l2_error(sigma_h, basis_sigma, problem))
-    flux_div_error = float(compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem))
+    flux_div_error = float(
+        compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem)
+    )
     u_error = float(compute_l2_error(u_h, basis_u, problem))
     n_dofs = space_sigma.number_of_dofs + space_u.number_of_dofs
 
@@ -162,18 +165,22 @@ def _print_and_save_table(rows: list[dict], path: Path) -> None:
 
 
 def main(resolutions: tuple[int, ...] = (4, 8, 16, 32)) -> None:
-    plots: dict = {}
+    directory = create_timestamped_output_directory(
+        "experiments", "mixed_uniform_refinement_sin_sin"
+    )
     rows: list[dict] = []
     for level, n in enumerate(resolutions):
         mesh, sigma_h, u_h, problem, n_dofs, flux_error, flux_div_error, u_error = (
             _solve_level(n)
         )
 
-        plots[f"level_{level}_mixed_solution"] = plot_mixed_solution(
-            sigma_h, u_h, mesh, problem
+        save_plot(
+            plot_mixed_solution(sigma_h, u_h, mesh, problem),
+            directory / f"level_{level}_mixed_solution.png",
         )
-        plots[f"level_{level}_divergence_vs_source"] = _plot_divergence_vs_source(
-            sigma_h, problem, mesh
+        save_plot(
+            _plot_divergence_vs_source(sigma_h, problem, mesh),
+            directory / f"level_{level}_divergence_vs_source.png",
         )
 
         rows.append(
@@ -203,9 +210,6 @@ def main(resolutions: tuple[int, ...] = (4, 8, 16, 32)) -> None:
         )
         current["u_l2_ratio"] = previous["u_l2_error"] / current["u_l2_error"]
 
-    directory = save_plots(
-        plots, directory="experiments", name="mixed_uniform_refinement_sin_sin"
-    )
     _print_and_save_table(rows, directory / "convergence_table.csv")
     print("\nPlots and table saved to", directory)
 

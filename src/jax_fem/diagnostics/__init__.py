@@ -24,10 +24,13 @@ from jax_fem.diagnostics.norms import (
     l2_error_density,
 )
 from jax_fem.diagnostics.plotting import (
+    create_timestamped_output_directory,
+    plot_convergence_rates,
     plot_error_estimator_and_marked_cells,
     plot_fem_error,
     plot_fem_error_3d,
     plot_mixed_solution,
+    save_plot,
     save_plots,
 )
 
@@ -48,5 +51,8 @@ __all__ = [
     "plot_fem_error_3d",
     "plot_error_estimator_and_marked_cells",
     "plot_mixed_solution",
+    "plot_convergence_rates",
+    "save_plot",
     "save_plots",
+    "create_timestamped_output_directory",
 ]

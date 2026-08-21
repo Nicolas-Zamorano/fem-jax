@@ -1,10 +1,11 @@
 """Closed-loop AMR study on the L-shaped re-entrant-corner singular problem.
 
 See Section 4.2 and 4.4 of the implementation plan
-(``.context/implementation_plan.md``, the AMR stretch item): a full
+(``.context/implementation_plan.md``, the AMR stretch item) and
+``context/in_house_amr_implementation_plan.md``: a full
 solve -> estimate -> adapt loop, using the classical residual estimator
-(``diagnostics.compute_residual_error_estimator``) to drive
-``mesh.adapt_l_shaped_mesh_from_error_estimator``.
+(``diagnostics.compute_residual_error_estimator``) to drive the in-house
+LEB engine (``mesh.adapt_mesh_from_error_estimator``).
 
 Unlike ``tests/convergence/test_residual_estimator_convergence.py`` (which
 checks a *tight*, monotonic uniform-refinement rate), this only checks the
@@ -32,7 +33,7 @@ from jax_fem.diagnostics import compute_residual_error_estimator
 from jax_fem.element import LagrangeTriangleP1
 from jax_fem.forms import elliptic_bilinear_form, elliptic_linear_form
 from jax_fem.function import FiniteElementFunction
-from jax_fem.mesh import adapt_l_shaped_mesh_from_error_estimator, create_gmsh_l_shaped_mesh
+from jax_fem.mesh import adapt_mesh_from_error_estimator, create_gmsh_l_shaped_mesh
 from jax_fem.problem import (
     create_poisson_l_shaped_singular_problem,
     evaluate_elliptic_coefficients,
@@ -81,9 +82,7 @@ def test_amr_loop_grows_the_mesh_and_reduces_the_global_estimator() -> None:
         dof_counts.append(n_dofs)
         etas.append(eta)
         assert eta > 0.0 and jnp.isfinite(eta)
-        mesh = adapt_l_shaped_mesh_from_error_estimator(
-            mesh, cell_indicators, theta=0.4, refinement_factor=0.5
-        )
+        mesh = adapt_mesh_from_error_estimator(mesh, cell_indicators, theta=0.4)
 
     # The mesh (and DOF count) strictly grows every iteration: the loop is
     # actually doing something, not stalling or degenerating.

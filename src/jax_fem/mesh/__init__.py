@@ -1,9 +1,10 @@
 """Mesh geometry, topology, and tags (Section 7)."""
 
 from jax_fem.mesh.amr import (
-    adapt_l_shaped_mesh_from_error_estimator,
+    adapt_mesh_from_error_estimator,
     compute_target_cell_sizes,
     mark_cells_by_dorfler_bulk_criterion,
+    refine_mesh_longest_edge_bisection,
 )
 from jax_fem.mesh.base import Mesh
 from jax_fem.mesh.gmsh import (
@@ -39,5 +40,6 @@ __all__ = [
     "read_triangle_mesh_from_msh",
     "mark_cells_by_dorfler_bulk_criterion",
     "compute_target_cell_sizes",
-    "adapt_l_shaped_mesh_from_error_estimator",
+    "refine_mesh_longest_edge_bisection",
+    "adapt_mesh_from_error_estimator",
 ]
