@@ -223,21 +223,18 @@ name = "jax-fem"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "gmsh" },
     { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "jax", version = "0.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
 [package.optional-dependencies]
-gmsh = [
-    { name = "gmsh" },
-]
 plotting = [
     { name = "matplotlib" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "gmsh" },
     { name = "matplotlib" },
     { name = "pytest" },
     { name = "ruff" },
@@ -245,15 +242,14 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gmsh", marker = "extra == 'gmsh'", specifier = ">=4.15.2" },
+    { name = "gmsh", specifier = ">=4.15.2" },
     { name = "jax", specifier = ">=0.10.2" },
     { name = "matplotlib", marker = "extra == 'plotting'", specifier = ">=3.11.1" },
 ]
-provides-extras = ["gmsh", "plotting"]
+provides-extras = ["plotting"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "gmsh", specifier = ">=4.15.2" },
     { name = "matplotlib", specifier = ">=3.11.1" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.3" },
