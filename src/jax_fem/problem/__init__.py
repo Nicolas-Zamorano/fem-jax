@@ -19,6 +19,7 @@ from jax_fem.problem.elliptic import (
 from jax_fem.problem.manufactured import (
     create_poisson_cos_sin_problem,
     create_poisson_exponential_problem,
+    create_poisson_l_shaped_singular_problem,
     create_poisson_sin_sin_problem,
     create_poisson_singular_problem,
     create_simple_elliptic_problem,
@@ -41,5 +42,6 @@ __all__ = [
     "create_poisson_cos_sin_problem",
     "create_poisson_exponential_problem",
     "create_poisson_singular_problem",
+    "create_poisson_l_shaped_singular_problem",
     "create_simple_elliptic_problem",
 ]

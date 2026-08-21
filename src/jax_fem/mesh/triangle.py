@@ -95,6 +95,32 @@ class TriangleMesh:
         return 2
 
 
+def cell_diameters(mesh: TriangleMesh) -> jax.Array:
+    """
+    Cell diameter (longest edge length) of each cell.
+
+    Parameters
+    ----------
+    mesh : TriangleMesh
+
+    Returns
+    -------
+    jax.Array
+        Shape ``(K,)``.
+    """
+    vertices = mesh.vertex_coordinates[mesh.cells_to_vertices]  # (K, 3, 1, 2)
+    v0, v1, v2 = vertices[:, 0], vertices[:, 1], vertices[:, 2]  # each (K, 1, 2)
+    edge_lengths = jnp.concatenate(
+        (
+            jnp.linalg.norm(v1 - v0, axis=-1),
+            jnp.linalg.norm(v2 - v1, axis=-1),
+            jnp.linalg.norm(v0 - v2, axis=-1),
+        ),
+        axis=-1,
+    )  # (K, 3)
+    return jnp.max(edge_lengths, axis=-1)
+
+
 def create_triangle_mesh_from_arrays(
     vertex_coordinates: ArrayLike,
     cells_to_vertices: ArrayLike,
@@ -288,58 +314,3 @@ def _tag_boundary_facets(
         )
 
     return tags, boundary_tag_names
-
-
-def create_structured_unit_square_mesh(number_of_cells_per_side: int) -> TriangleMesh:
-    """Build a structured triangular mesh of the unit square ``[0, 1]^2``.
-
-    An ``n x n`` grid of unit cells, each split into 2 triangles along the
-    same diagonal, with boundary facets tagged ``"bottom"`` (``y = 0``),
-    ``"right"`` (``x = 1``), ``"top"`` (``y = 1``), and ``"left"``
-    (``x = 0``). Intended for tests, teaching examples, and manufactured
-    problems (Section 7.3); Gmsh remains the primary way to mesh real
-    domains.
-
-    Parameters
-    ----------
-    number_of_cells_per_side:
-        Number of grid cells along each side, at least 1. The mesh has
-        ``2 * number_of_cells_per_side ** 2`` triangles.
-
-    Returns
-    -------
-    TriangleMesh
-    """
-    n = number_of_cells_per_side
-    if n < 1:
-        raise ValueError(
-            f"number_of_cells_per_side must be at least 1, got {n}."
-        )
-
-    coordinates_1d = np.linspace(0.0, 1.0, n + 1)
-    grid_x, grid_y = np.meshgrid(coordinates_1d, coordinates_1d, indexing="ij")
-    vertex_coordinates = np.stack((grid_x.reshape(-1), grid_y.reshape(-1)), axis=-1)
-
-    def vertex_index(i: int, j: int) -> int:
-        return i * (n + 1) + j
-
-    cells: list[tuple[int, int, int]] = []
-    for i in range(n):
-        for j in range(n):
-            bottom_left = vertex_index(i, j)
-            bottom_right = vertex_index(i + 1, j)
-            top_right = vertex_index(i + 1, j + 1)
-            top_left = vertex_index(i, j + 1)
-            cells.append((bottom_left, bottom_right, top_right))
-            cells.append((bottom_left, top_right, top_left))
-
-    return create_triangle_mesh_from_arrays(
-        vertex_coordinates,
-        np.asarray(cells),
-        boundary_data={
-            "bottom": lambda x: jnp.isclose(x[..., 0, 1], 0.0),
-            "right": lambda x: jnp.isclose(x[..., 0, 0], 1.0),
-            "top": lambda x: jnp.isclose(x[..., 0, 1], 1.0),
-            "left": lambda x: jnp.isclose(x[..., 0, 0], 0.0),
-        },
-    )

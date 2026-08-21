@@ -10,7 +10,7 @@ autodiff-derived-source-term facility (Section 18.5 is a separate future
 direction).
 
 All five problems live on the unit square; build a compatible mesh with
-``create_structured_unit_square_mesh`` (Section 7.3).
+``create_gmsh_unit_square_mesh`` (Section 7.3).
 """
 
 from __future__ import annotations
@@ -71,6 +71,7 @@ def create_poisson_sin_sin_problem(mesh: TriangleMesh) -> EllipticProblem:
         ),
         exact_solution=_poisson_sin_sin_solution,
         exact_gradient=_poisson_sin_sin_gradient,
+        advection_divergence=constant_scalar_coefficient(0.0),
     )
 
 
@@ -113,6 +114,7 @@ def create_poisson_cos_sin_problem(mesh: TriangleMesh) -> EllipticProblem:
         ),
         exact_solution=_poisson_cos_sin_solution,
         exact_gradient=_poisson_cos_sin_gradient,
+        advection_divergence=constant_scalar_coefficient(0.0),
     )
 
 
@@ -192,6 +194,7 @@ def create_poisson_exponential_problem(
         ),
         exact_solution=solution,
         exact_gradient=gradient,
+        advection_divergence=constant_scalar_coefficient(0.0),
     )
 
 
@@ -258,6 +261,94 @@ def create_poisson_singular_problem(mesh: TriangleMesh) -> EllipticProblem:
         ),
         exact_solution=_poisson_singular_solution,
         exact_gradient=_poisson_singular_gradient,
+        advection_divergence=constant_scalar_coefficient(0.0),
+    )
+
+
+# ---------------------------------------------------------------------------
+# 6. Genuine re-entrant-corner singular solution, for the L-shaped domain
+#    [-1, 1]^2 \ [0, 1] x [-1, 0] (``create_gmsh_l_shaped_mesh``). Additive
+#    to (4) above, not a replacement: (4)'s solution sits at a *convex*
+#    corner of the unit square (interior angle pi/2); this one sits at the
+#    L-shape's genuine 270-degree re-entrant corner, the standard benchmark
+#    for which the residual estimator's O(h^(2/3)) rate reflects an actual
+#    geometric singularity rather than only a prescribed non-smooth solution
+#    on an otherwise convex domain.
+# ---------------------------------------------------------------------------
+
+
+def _l_shaped_singular_polar(
+    points: jax.Array,
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
+    x, y = points[..., 0], points[..., 1]
+    r = jnp.sqrt(x**2 + y**2)
+    theta = jnp.arctan2(y, x)  # wrapped to (-pi, pi]
+    # The L-shaped domain's re-entrant sector is the *complement* of the
+    # fourth quadrant (theta in (-pi/2, 0), the removed [0,1]x[-1,0]
+    # rectangle): a contiguous 3*pi/2 arc starting at the positive x-axis
+    # (theta = 0) and sweeping counterclockwise through Q1, Q2, Q3 to the
+    # negative y-axis (theta = -pi/2, approached from below). Unwrap so
+    # this sector maps continuously to theta_prime in [0, 3*pi/2]: add 2*pi
+    # whenever atan2's wrapped value is negative (Q3 and the theta = -pi/2
+    # boundary). Q4 (theta in (-pi/2, 0)) is outside the domain and never
+    # queried, so its value here is unused.
+    theta_prime = jnp.where(theta >= 0.0, theta, theta + 2.0 * jnp.pi)
+    phi = _SINGULAR_ALPHA * theta_prime
+    return x, y, r, phi
+
+
+def _poisson_l_shaped_singular_solution(points: jax.Array) -> jax.Array:
+    _, _, r, phi = _l_shaped_singular_polar(points)
+    return (r**_SINGULAR_ALPHA * jnp.sin(phi))[..., None]
+
+
+def _poisson_l_shaped_singular_gradient(points: jax.Array) -> jax.Array:
+    x, y, r, phi = _l_shaped_singular_polar(points)
+    # Avoid division by zero; the true gradient is singular at r = 0.
+    safe_r = jnp.where(r > _SINGULAR_EPSILON, r, 1.0)
+
+    cos_theta = x / safe_r
+    sin_theta = y / safe_r
+    sin_phi = jnp.sin(phi)
+    cos_phi = jnp.cos(phi)
+    factor = _SINGULAR_ALPHA * safe_r ** (_SINGULAR_ALPHA - 1.0)
+
+    grad_x = factor * (sin_phi * cos_theta - cos_phi * sin_theta)
+    grad_y = factor * (sin_phi * sin_theta + cos_phi * cos_theta)
+    gradient = jnp.stack((grad_x, grad_y), axis=-1)
+
+    # This value at the origin is only a numerical placeholder: the true
+    # gradient is not defined there.
+    return jnp.where((r > _SINGULAR_EPSILON)[..., None], gradient, 0.0)
+
+
+def create_poisson_l_shaped_singular_problem(mesh: TriangleMesh) -> EllipticProblem:
+    """Harmonic solution with a genuine re-entrant-corner singularity.
+
+    ``u(r, theta') = r^(2/3) sin(2/3 theta')``, ``theta'`` measured
+    counterclockwise from the positive x-axis and unwrapped to
+    ``[0, 3 pi / 2]`` across the L-shaped domain's re-entrant sector;
+    harmonic away from the origin (``source = 0``). ``A = I``, ``beta = 0``,
+    ``c = 0``. Non-homogeneous Dirichlet BC equal to the exact solution
+    (which happens to vanish identically on the two straight edges meeting
+    at the re-entrant corner, ``theta' = 0`` and ``theta' = 3 pi / 2``, a
+    standard feature of this benchmark). Build a compatible mesh with
+    ``create_gmsh_l_shaped_mesh``.
+    """
+    return EllipticProblem(
+        name="poisson_l_shaped_singular",
+        diffusion=constant_tensor_coefficient(_IDENTITY_2X2),
+        advection=constant_vector_coefficient(_ZERO_VECTOR_2),
+        reaction=constant_scalar_coefficient(0.0),
+        source=constant_scalar_coefficient(0.0),
+        dirichlet_conditions=(
+            create_full_boundary_dirichlet_condition(
+                mesh, _poisson_l_shaped_singular_solution
+            ),
+        ),
+        exact_solution=_poisson_l_shaped_singular_solution,
+        exact_gradient=_poisson_l_shaped_singular_gradient,
+        advection_divergence=constant_scalar_coefficient(0.0),
     )
 
 
