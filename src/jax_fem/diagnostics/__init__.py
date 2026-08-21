@@ -1,5 +1,6 @@
 """
-Exact-error functionals and norms for finite element solutions.
+Exact-error functionals, norms, and a posteriori error estimation for
+finite element solutions.
 """
 
 from jax_fem.diagnostics.errors import (
@@ -8,6 +9,7 @@ from jax_fem.diagnostics.errors import (
     compute_l2_error,
     compute_relative_l2_error,
 )
+from jax_fem.diagnostics.estimator import compute_residual_error_estimator
 from jax_fem.diagnostics.norms import (
     energy_error_density,
     h1_seminorm_error_density,
@@ -20,6 +22,7 @@ __all__ = [
     "compute_relative_l2_error",
     "compute_h1_seminorm_error",
     "compute_energy_error",
+    "compute_residual_error_estimator",
     "l2_error_density",
     "h1_seminorm_error_density",
     "energy_error_density",

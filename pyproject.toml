@@ -9,12 +9,10 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "jax>=0.10.2",
+    "gmsh>=4.15.2",
 ]
 
 [project.optional-dependencies]
-gmsh = [
-    "gmsh>=4.15.2",
-]
 plotting = [
     "matplotlib>=3.11.1",
 ]
@@ -25,7 +23,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "gmsh>=4.15.2",
     "matplotlib>=3.11.1",
     "pytest>=9.1.1",
     "ruff>=0.16.3",
