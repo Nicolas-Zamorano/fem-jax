@@ -12,3 +12,4 @@ wheels/
 /.vscode/
 /.python-version
 /experiments/
+/.context/
