@@ -106,6 +106,64 @@ def _sub_triangulation_for_plotting(
     )
 
 
+def create_timestamped_output_directory(directory: str | Path, name: str) -> Path:
+    """
+    Create (and return) a fresh timestamped output directory.
+
+    Factored out of ``save_plots`` so a refinement loop can create the
+    directory once up front and save+close each figure immediately after
+    producing it (``save_plot``), instead of accumulating every
+    iteration's figures in memory until the very end -- which, for a loop
+    of more than ``matplotlib.rcParams["figure.max_open_warning"]``
+    (default 20) iterations, trips matplotlib's "more than 20 figures
+    opened" ``RuntimeWarning``.
+
+    Parameters
+    ----------
+    directory : str | Path
+        Parent directory the timestamped folder is created under.
+    name : str
+        Name of the folder.
+
+    Returns
+    -------
+    path : Path
+        Path to the newly created directory. The folder name has the form
+        ``name_YYMMDD_HHMM``.
+    """
+    timestamp = datetime.now(UTC).strftime("%y%m%d_%H%M")
+    output_dir = Path(directory) / f"{name}_{timestamp}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def save_plot(figure: Figure, path: str | Path, dpi: int = 500) -> None:
+    """
+    Save a single figure to ``path`` and close it.
+
+    Closing right after saving keeps a refinement loop's peak number of
+    simultaneously open figures at 1 regardless of how many iterations it
+    runs, avoiding matplotlib's "more than 20 figures opened"
+    ``RuntimeWarning`` (and the associated memory growth) that accumulating
+    every iteration's figures in a dict until the end would otherwise
+    cause.
+
+    Parameters
+    ----------
+    figure : Figure
+        The figure to save.
+    path : str | Path
+        Full output path, extension included.
+    dpi : int
+        DPI of the saved plot.
+    """
+    plt = _import_pyplot()
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(figure)
+
+
 def save_plots(
     plots: dict[str, Figure],
     directory: str | Path,
@@ -133,21 +191,130 @@ def save_plots(
         Path to the directory where the plots are saved.
         The folder name has the form ``name_YY-MM-DD_HH-MM``.
     """
-    timestamp = datetime.now(UTC).strftime("%y%m%d_%H%M")
-    output_dir = Path(directory) / f"{name}_{timestamp}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    output_dir = create_timestamped_output_directory(directory, name)
     extension = extension.lstrip(".")
 
-    # Save figures
     for plot_name, figure in plots.items():
-        figure.savefig(
-            output_dir / f"{plot_name}.{extension}",
-            dpi=dpi,
-            bbox_inches="tight",
-        )
+        save_plot(figure, output_dir / f"{plot_name}.{extension}", dpi=dpi)
 
     return output_dir
+
+
+def plot_convergence_rates(
+    n_dofs: jax.Array,
+    l2_errors: jax.Array,
+    h1_errors: jax.Array,
+    tail_fraction: float = 0.5,
+) -> Figure:
+    r"""
+    Log-log convergence plot of :math:`L^2`/:math:`H^1` error vs. ``n_dofs``.
+
+    A raw error-ratio between consecutive refinement levels/iterations is
+    hard to read as a convergence *rate*: it conflates the error's actual
+    decay with however much ``n_dofs`` happened to grow that step (which,
+    for AMR in particular, varies iteration to iteration). This plots every
+    point on log-log axes -- where a power law ``error ~ C * n_dofs^slope``
+    is a straight line with slope ``slope`` -- and fits that ``slope`` by
+    ordinary least squares (``jnp.polyfit`` degree 1 in log-log space) over
+    the last ``tail_fraction`` of the points (sorted by ``n_dofs``), since
+    early iterations on a coarse starting mesh are typically still
+    pre-asymptotic and would bias a fit over every point toward a shallower
+    (less negative) apparent rate.
+
+    The fitted ``slope`` is the number directly comparable against FEM
+    convergence theory's target exponent for the run at hand -- e.g. for
+    :math:`H^1`, ``-1/2`` under an optimally-graded AMR mesh on a
+    re-entrant-corner singularity vs. ``-1/3`` under uniform refinement on
+    the same singularity (and correspondingly ``-1`` vs. ``-2/3`` for
+    :math:`L^2`, by the standard duality argument).
+
+    Parameters
+    ----------
+    n_dofs : jax.Array
+        Degrees of freedom at each level/iteration, shape ``(n,)``,
+        ``n >= 2``.
+    l2_errors : jax.Array
+        :math:`L^2` errors, shape ``(n,)``.
+    h1_errors : jax.Array
+        :math:`H^1` seminorm errors, shape ``(n,)``.
+    tail_fraction : float
+        Fraction of the (``n_dofs``-sorted) points, counted from the end,
+        used to fit each rate; in ``(0, 1]``.
+
+    Returns
+    -------
+    figure : Figure
+        The figure containing the plot.
+    """
+    plt = _import_pyplot()
+
+    if not (0.0 < tail_fraction <= 1.0):
+        raise ValueError(f"tail_fraction must be in (0, 1], got {tail_fraction}.")
+
+    n_dofs = jnp.asarray(n_dofs, dtype=float)
+    l2_errors = jnp.asarray(l2_errors, dtype=float)
+    h1_errors = jnp.asarray(h1_errors, dtype=float)
+    if n_dofs.shape[0] < 2:
+        raise ValueError(
+            "plot_convergence_rates needs at least 2 points to fit a rate, "
+            f"got {n_dofs.shape[0]}."
+        )
+
+    order = jnp.argsort(n_dofs)
+    n_dofs, l2_errors, h1_errors = n_dofs[order], l2_errors[order], h1_errors[order]
+
+    number_of_tail_points = max(2, round(tail_fraction * n_dofs.shape[0]))
+    log_n_tail = jnp.log(n_dofs[-number_of_tail_points:])
+
+    def _fit(errors: jax.Array) -> tuple[float, float]:
+        log_errors_tail = jnp.log(errors[-number_of_tail_points:])
+        slope, intercept = jnp.polyfit(log_n_tail, log_errors_tail, 1)
+        return float(slope), float(intercept)
+
+    l2_slope, l2_intercept = _fit(l2_errors)
+    h1_slope, h1_intercept = _fit(h1_errors)
+
+    figure, axis = plt.subplots(figsize=(7, 5))
+    axis.set_xscale("log")
+    axis.set_yscale("log")
+    axis.set_xlabel("$N_{dofs}$")
+    axis.set_ylabel("error")
+    axis.set_title("Convergence rate")
+    axis.grid(True, which="both", linestyle=":", linewidth=0.5)
+
+    fit_n = n_dofs[-number_of_tail_points:]
+    axis.plot(
+        n_dofs,
+        l2_errors,
+        "o-",
+        color="tab:blue",
+        label=f"$L^2$ error (fitted rate {l2_slope:.3f})",
+    )
+    axis.plot(
+        fit_n,
+        jnp.exp(l2_intercept) * fit_n**l2_slope,
+        "--",
+        color="tab:blue",
+        alpha=0.5,
+    )
+    axis.plot(
+        n_dofs,
+        h1_errors,
+        "s-",
+        color="tab:orange",
+        label=f"$H^1$ error (fitted rate {h1_slope:.3f})",
+    )
+    axis.plot(
+        fit_n,
+        jnp.exp(h1_intercept) * fit_n**h1_slope,
+        "--",
+        color="tab:orange",
+        alpha=0.5,
+    )
+
+    axis.legend()
+
+    return figure
 
 
 def plot_fem_error(
@@ -483,12 +650,14 @@ def plot_mixed_solution(
     """
     plt = _import_pyplot()
 
-    centroid_quadrature = flux_solution.space.element.reference_cell.create_quadrature(1)
+    centroid_quadrature = flux_solution.space.element.reference_cell.create_quadrature(
+        1
+    )
     centroid_basis = create_cell_basis(flux_solution.space, centroid_quadrature)
     centroids = centroid_basis.physical_points[:, 0, 0, :]  # (K, 2)
-    flux_values = evaluate_finite_element_function(flux_solution, centroid_basis).values[
-        :, 0, 0, :
-    ]  # (K, 2)
+    flux_values = evaluate_finite_element_function(
+        flux_solution, centroid_basis
+    ).values[:, 0, 0, :]  # (K, 2)
     flux_magnitude = jnp.linalg.norm(flux_values, axis=-1)
 
     show_error_panel = problem is not None and problem.exact_gradient is not None
