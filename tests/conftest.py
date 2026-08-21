@@ -8,9 +8,9 @@ import math
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.element import LagrangeTriangleP1
+from jax_fem.element import LagrangeTriangleP1, LagrangeTriangleP2
 from jax_fem.mesh import (
-    create_structured_unit_square_mesh,
+    create_gmsh_unit_square_mesh,
     create_triangle_mesh_from_arrays,
 )
 from jax_fem.problem import (
@@ -18,7 +18,7 @@ from jax_fem.problem import (
     constant_tensor_coefficient,
     constant_vector_coefficient,
 )
-from jax_fem.reference_cell import ReferenceTriangle
+from jax_fem.reference_cell import ReferenceInterval, ReferenceTriangle
 
 # ---------------------------------------------------------------------------
 # Reference element
@@ -31,8 +31,18 @@ def reference_triangle() -> ReferenceTriangle:
 
 
 @pytest.fixture
+def reference_interval() -> ReferenceInterval:
+    return ReferenceInterval()
+
+
+@pytest.fixture
 def p1_element(reference_triangle: ReferenceTriangle) -> LagrangeTriangleP1:
     return LagrangeTriangleP1(reference_cell=reference_triangle)
+
+
+@pytest.fixture
+def p2_element(reference_triangle: ReferenceTriangle) -> LagrangeTriangleP2:
+    return LagrangeTriangleP2(reference_cell=reference_triangle)
 
 
 @pytest.fixture(params=[1, 2, 3, 4, 5], ids=lambda degree: f"degree{degree}")
@@ -143,7 +153,7 @@ def structured_unit_square_mesh_factory():
     resolution per parametrized run. Mesh refinement itself is out of scope
     (Section 2.1); each resolution is a fresh structured mesh.
     """
-    return create_structured_unit_square_mesh
+    return create_gmsh_unit_square_mesh
 
 
 # ---------------------------------------------------------------------------

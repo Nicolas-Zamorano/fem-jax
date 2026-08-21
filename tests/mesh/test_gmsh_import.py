@@ -1,16 +1,19 @@
-"""Tests for Gmsh model and .msh import paths (Sections 7.3, 7.4)."""
+"""Tests for Gmsh model and .msh import paths (Sections 7.3, 7.4).
 
+``gmsh`` is a required core dependency (Section 2.1), so these tests need no
+optional-dependency skip guard.
+"""
+
+import gmsh
 import jax.numpy as jnp
 import pytest
 
-pytestmark = pytest.mark.integration
-
-gmsh = pytest.importorskip("gmsh")
-
-from jax_fem.mesh import (  # noqa: E402
+from jax_fem.mesh import (
     create_triangle_mesh_from_gmsh_model,
     read_triangle_mesh_from_msh,
 )
+
+pytestmark = pytest.mark.integration
 
 
 def _build_tagged_square_model(mesh_size: float = 0.6) -> None:
