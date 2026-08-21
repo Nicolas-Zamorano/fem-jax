@@ -32,7 +32,7 @@ from jax_fem.diagnostics import (
 from jax_fem.element import LagrangeTriangleP1
 from jax_fem.forms import elliptic_bilinear_form, elliptic_linear_form
 from jax_fem.function import FiniteElementFunction
-from jax_fem.mesh import create_structured_unit_square_mesh
+from jax_fem.mesh import create_gmsh_unit_square_mesh
 from jax_fem.problem import (
     create_simple_elliptic_problem,
     evaluate_elliptic_coefficients,
@@ -41,9 +41,9 @@ from jax_fem.reference_cell import ReferenceTriangle
 from jax_fem.space import create_cell_basis, create_finite_element_space
 
 
-def main(resolution: int = 30) -> None:
+def main(resolution: int = 16) -> None:
 
-    mesh = create_structured_unit_square_mesh(resolution)
+    mesh = create_gmsh_unit_square_mesh(resolution)
 
     element = LagrangeTriangleP1(reference_cell=ReferenceTriangle())
 
@@ -76,7 +76,10 @@ def main(resolution: int = 30) -> None:
     figure_3d = plot_fem_error_3d(solution, basis, problem, mesh)
 
     directory = save_plots(
-        {"error_mesh": error_figure, "error_mesh_3d": figure_3d},
+        {
+            "error_mesh": error_figure,
+            "error_mesh_3d": figure_3d,
+        },
         directory="experiments",
         name=problem.name,
     )
