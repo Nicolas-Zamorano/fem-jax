@@ -355,10 +355,96 @@ def plot_fem_error_3d(
     axis_error.set_ylabel("y")
 
     axis_error.plot_trisurf(
+        x,
+        y,
+        triangles,
+        absolute_error.reshape(-1),
+        cmap="viridis",
+        edgecolors="k",
+        linewidth=0.1,
+    )
+
+    return figure
+
+
+def plot_error_estimator_and_marked_cells(
+    cell_indicators: jax.Array,
+    marked_cells: jax.Array,
+    mesh: TriangleMesh,
+) -> Figure:
+    """
+    Plot the residual error estimator ``eta_K`` and the cells marked for AMR.
+
+    Parameters
+    ----------
+    cell_indicators : jax.Array
+        Per-cell indicators ``eta_K``, shape ``(K,)`` (from
+        ``compute_residual_error_estimator``).
+    marked_cells : jax.Array
+        Boolean mask, shape ``(K,)`` (from
+        ``jax_fem.mesh.mark_cells_by_dorfler_bulk_criterion``).
+    mesh : TriangleMesh
+        The mesh ``cell_indicators``/``marked_cells`` were computed on.
+
+    Returns
+    -------
+    figure : Figure
+        The figure containing the plots.
+    """
+    plt = _import_pyplot()
+
+    figure, (axis_estimator, axis_marked) = plt.subplots(1, 2, figsize=(15, 5))
+
+    x_min, x_max = (
+        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+    )
+    y_min, y_max = (
+        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+    )
+
+    for axis in (axis_estimator, axis_marked):
+        axis.set_aspect("equal")
+        axis.set_xlim(x_min, x_max)
+        axis.set_ylim(y_min, y_max)
+        axis.set_xlabel("x")
+        axis.set_ylabel("y")
+
+    axis_estimator.set_title(r"Residual error estimator $\eta_K$")
+    triangle_plot_estimator = axis_estimator.tripcolor(
         mesh.vertex_coordinates[:, 0, 0],
         mesh.vertex_coordinates[:, 0, 1],
         mesh.cells_to_vertices,
-        absolute_error.reshape(-1),
+        facecolors=jnp.asarray(cell_indicators).reshape(-1),
+        shading="flat",
+        cmap="inferno",
+        edgecolors="k",
+        linewidth=0.1,
+    )
+    figure.colorbar(
+        triangle_plot_estimator, ax=axis_estimator, fraction=0.046, pad=0.04
+    )
+
+    number_marked = int(jnp.sum(marked_cells))
+    axis_marked.set_title(
+        f"Cells marked for refinement ({number_marked}/{mesh.cells_to_vertices.shape[0]})"
+    )
+    axis_marked.tripcolor(
+        mesh.vertex_coordinates[:, 0, 0],
+        mesh.vertex_coordinates[:, 0, 1],
+        mesh.cells_to_vertices,
+        facecolors=jnp.asarray(marked_cells).astype(float).reshape(-1),
+        shading="flat",
+        cmap="Reds",
+        vmin=0.0,
+        vmax=1.0,
+        edgecolors="k",
+        linewidth=0.1,
+    )
+
+    return figure
+
         cmap="viridis",
         edgecolors="k",
         linewidth=0.1,
