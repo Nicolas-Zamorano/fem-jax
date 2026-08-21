@@ -56,7 +56,9 @@ def main(resolution: int = 12) -> None:
     )
 
     flux_error = float(compute_flux_l2_error(sigma_h, basis_sigma, problem))
-    flux_div_error = float(compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem))
+    flux_div_error = float(
+        compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem)
+    )
     u_error = float(compute_l2_error(u_h, basis_u, problem))
 
     figure = plot_mixed_solution(sigma_h, u_h, mesh, problem)
@@ -65,7 +67,9 @@ def main(resolution: int = 12) -> None:
     )
 
     number_of_cells = mesh.cells_to_vertices.shape[0]
-    print(f"resolution:            {resolution} x {resolution} ({number_of_cells} cells)")
+    print(
+        f"resolution:            {resolution} x {resolution} ({number_of_cells} cells)"
+    )
     print(
         f"degrees of freedom:     {space_sigma.number_of_dofs} (sigma, RT0) + "
         f"{space_u.number_of_dofs} (u, P0) = "
