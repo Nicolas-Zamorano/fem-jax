@@ -445,9 +445,125 @@ def plot_error_estimator_and_marked_cells(
 
     return figure
 
+
+def plot_mixed_solution(
+    flux_solution: FiniteElementFunction,
+    scalar_solution: FiniteElementFunction,
+    mesh: TriangleMesh,
+    problem: EllipticProblem | None = None,
+) -> Figure:
+    """
+    Plot a mixed (RT0 flux / P0 scalar) solution.
+
+    ``scalar_solution`` (P0) has exactly one DOF per cell, so it plots
+    directly as a flat-shaded ``tripcolor`` -- no sub-triangulation needed
+    (unlike ``plot_fem_error_3d``'s P1/P2 handling). ``flux_solution`` (RT0)
+    is genuinely vector-valued, so it is shown as a per-cell quiver at cell
+    centroids (a degree-1 quadrature rule is exactly the reference
+    triangle's centroid, Section 5.2's ``CellBasis``), colored by magnitude.
+    If ``problem`` is given and provides ``exact_gradient``, a third panel
+    shows the pointwise flux magnitude error against
+    ``sigma_exact = -A grad(u_exact)`` (Section 5.1) at the same centroids.
+
+    Parameters
+    ----------
+    flux_solution : FiniteElementFunction
+        The mixed finite element flux solution (e.g. RT0's ``sigma``).
+    scalar_solution : FiniteElementFunction
+        The mixed finite element scalar solution (e.g. P0's ``u``).
+    mesh : TriangleMesh
+        The mesh to plot on.
+    problem : EllipticProblem | None
+        The elliptic problem, for the optional exact-flux-error panel.
+
+    Returns
+    -------
+    figure : Figure
+        The figure containing the plots.
+    """
+    plt = _import_pyplot()
+
+    centroid_quadrature = flux_solution.space.element.reference_cell.create_quadrature(1)
+    centroid_basis = create_cell_basis(flux_solution.space, centroid_quadrature)
+    centroids = centroid_basis.physical_points[:, 0, 0, :]  # (K, 2)
+    flux_values = evaluate_finite_element_function(flux_solution, centroid_basis).values[
+        :, 0, 0, :
+    ]  # (K, 2)
+    flux_magnitude = jnp.linalg.norm(flux_values, axis=-1)
+
+    show_error_panel = problem is not None and problem.exact_gradient is not None
+    number_of_panels = 3 if show_error_panel else 2
+    figure, axes = plt.subplots(1, number_of_panels, figsize=(7 * number_of_panels, 5))
+    axis_scalar, axis_flux = axes[0], axes[1]
+
+    x_min, x_max = (
+        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+    )
+    y_min, y_max = (
+        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+    )
+
+    for axis in axes:
+        axis.set_aspect("equal")
+        axis.set_xlim(x_min, x_max)
+        axis.set_ylim(y_min, y_max)
+        axis.set_xlabel("x")
+        axis.set_ylabel("y")
+
+    axis_scalar.set_title("$u_h$ (P0)")
+    triangle_plot_scalar = axis_scalar.tripcolor(
+        mesh.vertex_coordinates[:, 0, 0],
+        mesh.vertex_coordinates[:, 0, 1],
+        mesh.cells_to_vertices,
+        facecolors=scalar_solution.dof_values.reshape(-1),
+        shading="flat",
         cmap="viridis",
         edgecolors="k",
         linewidth=0.1,
     )
+    figure.colorbar(triangle_plot_scalar, ax=axis_scalar, fraction=0.046, pad=0.04)
+
+    axis_flux.set_title(r"$\sigma_h$ (RT0), per-cell centroid")
+    axis_flux.triplot(
+        mesh.vertex_coordinates[:, 0, 0],
+        mesh.vertex_coordinates[:, 0, 1],
+        mesh.cells_to_vertices,
+        color="k",
+        linewidth=0.1,
+    )
+    quiver_plot = axis_flux.quiver(
+        centroids[:, 0],
+        centroids[:, 1],
+        flux_values[:, 0],
+        flux_values[:, 1],
+        flux_magnitude,
+        cmap="viridis",
+    )
+    figure.colorbar(quiver_plot, ax=axis_flux, fraction=0.046, pad=0.04)
+
+    if show_error_panel:
+        axis_error = axes[2]
+        exact_gradient = problem.exact_gradient(centroid_basis.physical_points)
+        diffusion = problem.diffusion(centroid_basis.physical_points)
+        exact_flux = -(exact_gradient @ diffusion.mT)  # (K, 1, 1, d)
+        flux_h = evaluate_finite_element_function(flux_solution, centroid_basis).values
+        flux_error_magnitude = jnp.linalg.norm(
+            (flux_h - exact_flux)[:, 0, 0, :], axis=-1
+        )
+
+        axis_error.set_title(r"$|\sigma_h - \sigma_{exact}|$ at cell centroids")
+        triangle_plot_error = axis_error.tripcolor(
+            mesh.vertex_coordinates[:, 0, 0],
+            mesh.vertex_coordinates[:, 0, 1],
+            mesh.cells_to_vertices,
+            facecolors=flux_error_magnitude,
+            shading="flat",
+            cmap="inferno",
+            edgecolors="k",
+            linewidth=0.1,
+        )
+        figure.colorbar(triangle_plot_error, ax=axis_error, fraction=0.046, pad=0.04)
 
     return figure
