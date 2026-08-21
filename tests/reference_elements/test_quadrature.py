@@ -87,3 +87,78 @@ def test_invalid_exactness_degree_raises(reference_triangle) -> None:
 def test_exactness_degree_beyond_table_raises(reference_triangle) -> None:
     with pytest.raises(ValueError):
         reference_triangle.create_quadrature(100)
+
+
+# ---------------------------------------------------------------------------
+# 1D reference-interval quadrature (Section 4.2: FacetBasis)
+# ---------------------------------------------------------------------------
+
+
+def _exact_interval_monomial_integral(power: int) -> float:
+    """Exact value of int_0^1 t^power dt."""
+    return 1.0 / (power + 1)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
+def test_interval_weights_sum_to_one(requested_degree: int, reference_interval) -> None:
+    quadrature = reference_interval.create_quadrature(requested_degree)
+    assert jnp.sum(quadrature.weights) == pytest.approx(1.0, abs=1e-14)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
+def test_interval_shapes(requested_degree: int, reference_interval) -> None:
+    quadrature = reference_interval.create_quadrature(requested_degree)
+    number_of_points = quadrature.points.shape[1]
+    assert quadrature.points.shape == (1, number_of_points, 1, 1)
+    assert quadrature.weights.shape == (1, number_of_points, 1, 1)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
+def test_interval_selected_exactness_covers_request(
+    requested_degree: int, reference_interval
+) -> None:
+    quadrature = reference_interval.create_quadrature(requested_degree)
+    assert quadrature.exactness_degree >= requested_degree
+
+
+@pytest.mark.unit
+def test_interval_degree_two_reuses_degree_three_rule(reference_interval) -> None:
+    quadrature = reference_interval.create_quadrature(2)
+    assert quadrature.exactness_degree == 3
+
+
+@pytest.mark.unit
+def test_interval_degree_four_reuses_degree_five_rule(reference_interval) -> None:
+    quadrature = reference_interval.create_quadrature(4)
+    assert quadrature.exactness_degree == 5
+
+
+@pytest.mark.unit
+@pytest.mark.property
+@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
+def test_interval_exact_for_all_monomials_up_to_degree(
+    requested_degree: int, reference_interval
+) -> None:
+    quadrature = reference_interval.create_quadrature(requested_degree)
+    t = quadrature.points[0, :, 0, 0]
+    weights = quadrature.weights[0, :, 0, 0]
+
+    for power in range(quadrature.exactness_degree + 1):
+        numerical = reference_interval.measure * jnp.sum(weights * t**power)
+        expected = _exact_interval_monomial_integral(power)
+        assert numerical == pytest.approx(expected, abs=1e-14), power
+
+
+@pytest.mark.unit
+def test_interval_invalid_exactness_degree_raises(reference_interval) -> None:
+    with pytest.raises(ValueError):
+        reference_interval.create_quadrature(0)
+
+
+@pytest.mark.unit
+def test_interval_exactness_degree_beyond_table_raises(reference_interval) -> None:
+    with pytest.raises(ValueError):
+        reference_interval.create_quadrature(100)

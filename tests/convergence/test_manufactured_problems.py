@@ -30,11 +30,12 @@ from jax_fem.diagnostics import compute_h1_seminorm_error, compute_l2_error
 from jax_fem.element import LagrangeTriangleP1
 from jax_fem.forms import elliptic_bilinear_form, elliptic_linear_form
 from jax_fem.function import FiniteElementFunction
-from jax_fem.mesh import create_structured_unit_square_mesh
+from jax_fem.mesh import create_gmsh_l_shaped_mesh, create_gmsh_unit_square_mesh
 from jax_fem.problem import (
     EllipticProblem,
     create_poisson_cos_sin_problem,
     create_poisson_exponential_problem,
+    create_poisson_l_shaped_singular_problem,
     create_poisson_sin_sin_problem,
     create_poisson_singular_problem,
     create_simple_elliptic_problem,
@@ -57,7 +58,7 @@ _SAMPLE_POINTS = jnp.array(
     ]
 )
 
-_MESH = create_structured_unit_square_mesh(1)  # only used as a mesh handle
+_MESH = create_gmsh_unit_square_mesh(1)  # only used as a mesh handle
 
 _PROBLEM_FACTORIES = {
     "sin_sin": create_poisson_sin_sin_problem,
@@ -183,7 +184,7 @@ def _solve(problem: EllipticProblem, space, basis) -> FiniteElementFunction:
 def test_discrete_solve_error_is_small(
     name: str, l2_tolerance: float, h1_tolerance: float
 ) -> None:
-    mesh = create_structured_unit_square_mesh(16)
+    mesh = create_gmsh_unit_square_mesh(16)
     element = LagrangeTriangleP1(reference_cell=ReferenceTriangle())
     space = create_finite_element_space(mesh, element)
     quadrature = space.element.reference_cell.create_quadrature(5)
@@ -196,3 +197,83 @@ def test_discrete_solve_error_is_small(
     h1_error = float(compute_h1_seminorm_error(solution, basis, problem))
     assert l2_error < l2_tolerance, l2_error
     assert h1_error < h1_tolerance, h1_error
+
+
+# ---------------------------------------------------------------------------
+# L-shaped re-entrant-corner singular problem (Section 4.3): a distinct
+# domain from every problem above, so it gets its own small, self-contained
+# set of checks rather than being shoehorned into _MESH/_SAMPLE_POINTS
+# (which assume the unit square).
+# ---------------------------------------------------------------------------
+
+# Interior sample points spread across all 3 quadrants of the L-shaped
+# domain's re-entrant sector (Q1, Q2, Q3), away from the removed Q4
+# rectangle, the domain boundary, and the origin corner itself.
+_L_SHAPED_SAMPLE_POINTS = jnp.array(
+    [
+        (0.3, 0.2),
+        (0.05, 0.9),
+        (0.9, 0.05),
+        (-0.3, 0.4),
+        (-0.9, 0.1),
+        (-0.1, 0.9),
+        (-0.4, -0.3),
+        (-0.9, -0.9),
+        (-0.1, -0.9),
+    ]
+)
+
+
+@pytest.mark.unit
+@pytest.mark.jax
+def test_l_shaped_singular_exact_gradient_matches_autodiff() -> None:
+    problem = create_poisson_l_shaped_singular_problem(
+        create_gmsh_l_shaped_mesh(1.0)
+    )
+    _check_gradient_matches_autodiff(problem, _L_SHAPED_SAMPLE_POINTS)
+
+
+@pytest.mark.unit
+def test_l_shaped_singular_vanishes_on_reentrant_corner_edges() -> None:
+    """The exact solution vanishes identically on the two straight edges
+    meeting at the re-entrant corner (the positive x-axis and negative
+    y-axis), a standard feature of this benchmark (Section 4.3)."""
+    problem = create_poisson_l_shaped_singular_problem(
+        create_gmsh_l_shaped_mesh(1.0)
+    )
+    edge_points = jnp.array([(0.3, 0.0), (0.8, 0.0), (0.0, -0.3), (0.0, -0.9)])
+    values = problem.exact_solution(edge_points.reshape(1, 4, 1, 2))
+    assert jnp.max(jnp.abs(values)) < 1e-12
+
+
+@pytest.mark.unit
+def test_l_shaped_singular_dirichlet_values_equal_exact_solution_at_boundary() -> None:
+    mesh = create_gmsh_l_shaped_mesh(0.3)
+    problem = create_poisson_l_shaped_singular_problem(mesh)
+    element = LagrangeTriangleP1(reference_cell=ReferenceTriangle())
+    space = create_finite_element_space(mesh, element)
+    dofs, values = evaluate_dirichlet_dof_values(problem, space)
+    coordinates = space.dof_coordinates[dofs]
+    expected = problem.exact_solution(coordinates)[:, :, 0]
+    assert jnp.allclose(values, expected, atol=1e-14)
+
+
+@pytest.mark.integration
+@pytest.mark.end_to_end
+def test_l_shaped_singular_discrete_solve_error_is_small() -> None:
+    """A loose pipeline sanity check at one coarse resolution, not a rate
+    assertion (see ``test_residual_estimator_convergence.py`` for the rate
+    study this problem is actually built for)."""
+    mesh = create_gmsh_l_shaped_mesh(0.15)
+    element = LagrangeTriangleP1(reference_cell=ReferenceTriangle())
+    space = create_finite_element_space(mesh, element)
+    quadrature = space.element.reference_cell.create_quadrature(5)
+    basis = create_cell_basis(space, quadrature)
+
+    problem = create_poisson_l_shaped_singular_problem(mesh)
+    solution = _solve(problem, space, basis)
+
+    l2_error = float(compute_l2_error(solution, basis, problem))
+    h1_error = float(compute_h1_seminorm_error(solution, basis, problem))
+    assert l2_error < 1e-2, l2_error
+    assert h1_error < 0.3, h1_error
