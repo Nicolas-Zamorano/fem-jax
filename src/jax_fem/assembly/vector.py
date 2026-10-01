@@ -19,34 +19,33 @@ def assemble_linear_form(
     """
     Assemble a linear form into a global dense vector.
 
-    Evaluates the pointwise form, integrates it over each cell
-    (Section 14.1), and accumulates the local ``(K, N_phi, 1)`` vectors
-    into a global ``(N_dofs, 1)`` vector using ``space.cells_to_dofs``, via
-    one flat scatter-add rather than a per-cell scatter.
-
     Parameters
     ----------
-    form:
-        The linear form to assemble.
-    basis:
-        Evaluated geometry and basis (Section 10.2).
-    coefficients:
+    form : LinearForm
+        The pointwise form to assemble, returning shape ``(K, Q, N_test, 1)``.
+    basis : CellBasis
+        Evaluated test-space geometry and basis.
+    coefficients : EllipticCoefficientValues
         Evaluated elliptic coefficients at ``basis.physical_points``.
 
     Returns
     -------
-    jax.Array
-        Shape ``(N_dofs, 1)``.
+    global_vector : jax.Array
+        Assembled load vector, shape ``(N_dofs, 1)``.
+
+    Notes
+    -----
+    The local ``(K, N_test, 1)`` vectors are accumulated into the global
+    vector through ``space.cells_to_dofs`` with one flat scatter-add rather
+    than a per-cell scatter.
     """
-    pointwise = form(basis, coefficients)  # (K, Q, N_phi, 1)
+    pointwise = form(basis, coefficients)
     local_vectors = integrate_cellwise(pointwise, basis.physical_weights)
 
-    cells_to_dofs = basis.space.cells_to_dofs  # (K, N_phi)
-    number_of_dofs = basis.space.number_of_dofs
+    flat_indices = basis.space.cells_to_dofs.ravel()
+    flat_values = local_vectors.ravel()
 
-    flat_indices = cells_to_dofs.reshape(-1)
-    flat_values = local_vectors.reshape(-1)
-
-    global_vector = jnp.zeros((number_of_dofs,), dtype=flat_values.dtype)
+    global_vector = jnp.zeros((basis.space.number_of_dofs,), dtype=flat_values.dtype)
     global_vector = global_vector.at[flat_indices].add(flat_values)
-    return global_vector[:, None]
+
+    return jnp.expand_dims(global_vector, axis=-1)

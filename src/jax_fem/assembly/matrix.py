@@ -2,8 +2,10 @@
 Global matrix assembly.
 """
 
+from collections.abc import Callable
 from typing import TypeAlias
 
+import jax
 import jax.numpy as jnp
 from jax.experimental import sparse as jax_sparse
 
@@ -17,52 +19,79 @@ GlobalMatrix: TypeAlias = jax_sparse.BCOO
 
 
 def assemble_bilinear_form(
-    form: BilinearForm,
-    basis: CellBasis,
-    coefficients: EllipticCoefficientValues,
+    form: BilinearForm | Callable[[CellBasis, CellBasis], jax.Array],
+    basis_test: CellBasis,
+    basis_trial: CellBasis | None = None,
+    coefficients: EllipticCoefficientValues | None = None,
 ) -> GlobalMatrix:
     """
     Assemble a bilinear form into a global sparse matrix.
 
-    Evaluates the pointwise form, integrates it over each cell, and scatters
-    the local ``(K, N_phi, N_phi)`` matrices into a global ``(N_dofs, N_dofs)``
-    sparse matrix using ``space.cells_to_dofs`` for the row and column indices,
-    via one flat construction rather than a per-cell scatter.
-
-    Local contributions from cells sharing a DOF land on the same ``(row, col)``
-    index pair and are **not** eagerly deduplicated: the returned matrix may store
-    several entries at the same index. JAX's ``BCOO`` sums duplicate-index entries
-    on ``todense()``, matrix products, and other consuming operations, so this is
-    transparent to callers; call ``.sum_duplicates()`` explicitly for a compacted
-    representation.
-
     Parameters
     ----------
-    form : BilinearForm
-        The bilinear form to assemble.
-    basis : CellBasis
-        Evaluated geometry and basis.
-    coefficients : EllipticCoefficientValues
-        Evaluated elliptic coefficients at ``basis.physical_points``.
+    form : BilinearForm | Callable[[CellBasis, CellBasis], jax.Array]
+        The pointwise form to assemble, returning shape
+        ``(K, Q, N_test, N_trial)``. Called as ``form(basis_test,
+        coefficients)`` when ``basis_trial`` is ``None``, and as
+        ``form(basis_test, basis_trial)`` otherwise.
+    basis_test : CellBasis
+        Evaluated test-space geometry and basis, indexing the matrix rows.
+    basis_trial : CellBasis | None
+        Evaluated trial-space geometry and basis, indexing the matrix
+        columns. Must share the cells and quadrature points of
+        ``basis_test``. If ``None``, the trial space is the test space.
+    coefficients : EllipticCoefficientValues | None
+        Evaluated coefficients at ``basis_test.physical_points``. Required
+        if ``basis_trial`` is ``None``, and must be ``None`` otherwise.
 
     Returns
     -------
-    GlobalMatrix
-        Shape ``(N_dofs, N_dofs)``.
+    global_matrix : GlobalMatrix
+        Assembled sparse matrix, shape ``(N_dofs_test, N_dofs_trial)``.
+
+    Notes
+    -----
+    With ``basis_trial`` omitted, this assembles a single-space square
+    matrix (e.g. stiffness or mass). With ``basis_trial`` given, it
+    assembles a two-space rectangular matrix (e.g. the mixed divergence
+    form's P0 test space against its RT0 trial space).
+
+    Local contributions from cells sharing a DOF land on the same
+    ``(row, col)`` index pair and are **not** eagerly deduplicated: the
+    returned matrix may store several entries at the same index. JAX's
+    ``BCOO`` sums duplicate-index entries on ``todense()``, matrix products,
+    and other consuming operations, so this is transparent to callers; call
+    ``.sum_duplicates()`` explicitly for a compacted representation.
     """
-    pointwise = form(basis, coefficients)  # (K, Q, N_phi, N_phi)
-    local_matrices = integrate_cellwise(pointwise, basis.physical_weights)
+    if basis_trial is None:
+        if coefficients is None:
+            raise ValueError(
+                "coefficients is required when basis_trial is None (single-space form)."
+            )
+        basis_trial = basis_test
+        pointwise = form(basis_test, coefficients)
+    else:
+        if coefficients is not None:
+            raise ValueError(
+                "coefficients must be None when basis_trial is given: a two-space "
+                "form is called as form(basis_test, basis_trial)."
+            )
+        pointwise = form(basis_test, basis_trial)
 
-    cells_to_dofs = basis.space.cells_to_dofs  # (K, N_phi)
-    number_of_dofs = basis.space.number_of_dofs
+    local_matrices = integrate_cellwise(pointwise, basis_test.physical_weights)
 
-    row_indices = jnp.broadcast_to(cells_to_dofs[:, :, None], local_matrices.shape)
-    col_indices = jnp.broadcast_to(cells_to_dofs[:, None, :], local_matrices.shape)
-    flat_indices = jnp.stack(
-        (row_indices.reshape(-1), col_indices.reshape(-1)), axis=-1
+    row_indices = jnp.broadcast_to(
+        jnp.expand_dims(basis_test.space.cells_to_dofs, axis=-1),
+        local_matrices.shape,
     )
-    flat_data = local_matrices.reshape(-1)
+    col_indices = jnp.broadcast_to(
+        jnp.expand_dims(basis_trial.space.cells_to_dofs, axis=-2),
+        local_matrices.shape,
+    )
+    flat_indices = jnp.stack((row_indices.ravel(), col_indices.ravel()), axis=-1)
+    flat_data = local_matrices.ravel()
 
     return jax_sparse.BCOO(
-        (flat_data, flat_indices), shape=(number_of_dofs, number_of_dofs)
+        (flat_data, flat_indices),
+        shape=(basis_test.space.number_of_dofs, basis_trial.space.number_of_dofs),
     )
