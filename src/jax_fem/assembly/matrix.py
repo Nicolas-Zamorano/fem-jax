@@ -63,6 +63,10 @@ def assemble_bilinear_form(
     and other consuming operations, so this is transparent to callers; call
     ``.sum_duplicates()`` explicitly for a compacted representation.
     """
+    if isinstance(basis_trial, EllipticCoefficientValues):
+        coefficients = basis_trial
+        basis_trial = None
+
     if basis_trial is None:
         if coefficients is None:
             raise ValueError(

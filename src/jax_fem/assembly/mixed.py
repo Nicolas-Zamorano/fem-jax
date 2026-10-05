@@ -15,6 +15,9 @@ from jax_fem.forms.mixed import elliptic_mixed_div_form, elliptic_mixed_mass_for
 from jax_fem.problem.elliptic import EllipticProblem, evaluate_elliptic_coefficients
 from jax_fem.space.cell_basis import CellBasis
 
+#: Alias for assemble_bilinear_form when assembling mixed/two-space forms.
+assemble_mixed_bilinear_form = assemble_bilinear_form
+
 
 def assemble_mixed_system(
     basis_sigma: CellBasis,
