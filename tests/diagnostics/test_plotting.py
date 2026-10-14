@@ -13,7 +13,11 @@ import pytest
 
 pytest.importorskip("matplotlib")
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form  # noqa: E402
+from jax_fem.assembly import (  # noqa: E402
+    assemble_matrix,
+    assemble_vector,
+    integrate_cellwise,
+)
 from jax_fem.constraints import (  # noqa: E402
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
@@ -110,8 +114,14 @@ def _solve(mesh, element):
     basis = create_cell_basis(space, quadrature)
     problem = create_simple_elliptic_problem(mesh)
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values

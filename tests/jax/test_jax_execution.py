@@ -1,34 +1,20 @@
 """JAX execution-path tests.
 
-See Section 17 of the architecture specification; JAX-01, JAX-02, and
-JAX-04 of the FEM testing plan.
+There is no float32 comparison: ``jax_fem/__init__.py`` always enables
+``jax_enable_x64`` at import time, so there is no float32 code path.
 
-JAX-03 (float32 vs. float64 comparison) does not apply to this library:
-``jax_fem/__init__.py`` unconditionally enables ``jax_enable_x64`` at
-import time with no opt-out (a deliberate choice for FEM convergence
-studies), so there is no float32 code path to compare against.
-
-Most of this library's own custom dataclasses (``CellBasis``,
-``FiniteElementSpace``, ``TriangleMesh``, ...) are deliberately not
-registered as JAX pytrees (Section 17.3: only worth it when it gives a
-concrete benefit). That means they cannot be traced *inputs* to a jitted
-function directly; they can only be passed as ``static_argnums`` (they are
-hashable by identity, being frozen dataclasses), and a jitted function
-cannot *return* one either. The tests below account for this: they either
-mark such dataclass arguments static and use a plain-array/NamedTuple
-argument as the actual traced input, or route the comparison through
-values extracted from the dataclass.
+The library's dataclasses (``CellBasis``, ``FiniteElementSpace``,
+``TriangleMesh``, ...) are not registered as JAX pytrees, so they cannot be
+traced inputs or outputs of a jitted function. The tests below either pass
+them as static arguments, close over them, or compare values extracted from
+them, with plain arrays or NamedTuples as the traced inputs.
 """
 
 import jax
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import (
-    assemble_bilinear_form,
-    assemble_linear_form,
-    integrate_cellwise,
-)
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.element import LagrangeTriangleP1
 from jax_fem.forms import elliptic_bilinear_form, elliptic_linear_form
 from jax_fem.function import FiniteElementFunction, evaluate_finite_element_function
@@ -70,7 +56,7 @@ def _make_coefficients(basis):
 @pytest.mark.jax
 @pytest.mark.integration
 def test_eager_and_jit_agree_for_elliptic_forms() -> None:
-    """JAX-01: elliptic_bilinear_form/elliptic_linear_form under eager vs. jit.
+    """Elliptic_bilinear_form/elliptic_linear_form under eager vs. jit.
 
     ``basis`` is a non-pytree dataclass, so it is marked static;
     ``coefficients`` (an ``EllipticCoefficientValues`` NamedTuple, a real
@@ -79,9 +65,9 @@ def test_eager_and_jit_agree_for_elliptic_forms() -> None:
     _, basis = _make_space_and_basis()
     coefficients = _make_coefficients(basis)
 
-    eager_bilinear = elliptic_bilinear_form(basis, coefficients)
-    jitted_bilinear = jax.jit(elliptic_bilinear_form, static_argnums=(0,))(
-        basis, coefficients
+    eager_bilinear = elliptic_bilinear_form(basis, basis, coefficients)
+    jitted_bilinear = jax.jit(elliptic_bilinear_form, static_argnums=(0, 1))(
+        basis, basis, coefficients
     )
     assert jnp.allclose(eager_bilinear, jitted_bilinear, atol=1e-14, rtol=1e-12)
 
@@ -95,27 +81,31 @@ def test_eager_and_jit_agree_for_elliptic_forms() -> None:
 @pytest.mark.jax
 @pytest.mark.integration
 def test_eager_and_jit_agree_for_assembly() -> None:
-    """JAX-01: assemble_bilinear_form/assemble_linear_form under eager vs. jit.
+    """Evaluate, integrate, and assemble under eager execution vs. jit.
 
-    ``form`` and ``basis`` are static; ``coefficients`` is traced. The
-    assembled matrix is a ``jax.experimental.sparse.BCOO``, which -- unlike
-    this library's own dataclasses -- *is* a registered JAX pytree, so it
-    is a valid jitted return value.
+    ``basis`` is closed over (a non-pytree dataclass); ``coefficients`` is the
+    traced input. The assembled ``BCOO`` matrix is a registered pytree and a
+    valid jitted return value.
     """
     _, basis = _make_space_and_basis()
     coefficients = _make_coefficients(basis)
 
-    eager_matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    jitted_matrix = jax.jit(assemble_bilinear_form, static_argnums=(0, 1))(
-        elliptic_bilinear_form, basis, coefficients
-    )
+    def assemble_system(coefficients):
+        local_matrices = integrate_cellwise(
+            elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+        )
+        local_vectors = integrate_cellwise(
+            elliptic_linear_form(basis, coefficients), basis.physical_weights
+        )
+        return (
+            assemble_matrix(local_matrices, basis.space, basis.space),
+            assemble_vector(local_vectors, basis.space),
+        )
+
+    eager_matrix, eager_vector = assemble_system(coefficients)
+    jitted_matrix, jitted_vector = jax.jit(assemble_system)(coefficients)
     assert jnp.allclose(
         eager_matrix.todense(), jitted_matrix.todense(), atol=1e-14, rtol=1e-12
-    )
-
-    eager_vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
-    jitted_vector = jax.jit(assemble_linear_form, static_argnums=(0, 1))(
-        elliptic_linear_form, basis, coefficients
     )
     assert jnp.allclose(eager_vector, jitted_vector, atol=1e-14, rtol=1e-12)
 
@@ -123,7 +113,7 @@ def test_eager_and_jit_agree_for_assembly() -> None:
 @pytest.mark.jax
 @pytest.mark.integration
 def test_eager_and_jit_agree_for_function_evaluation() -> None:
-    """JAX-01: evaluate_finite_element_function under eager vs. jit.
+    """Evaluate_finite_element_function under eager vs. jit.
 
     ``space`` and ``basis`` are static; ``dof_values`` (a plain array) is
     the traced input, exercising real trace-dependent behavior.
@@ -145,10 +135,10 @@ def test_eager_and_jit_agree_for_function_evaluation() -> None:
 @pytest.mark.jax
 @pytest.mark.integration
 def test_python_loop_matches_batched_local_stiffness_assembly() -> None:
-    """JAX-02 (adapted): batched (broadcast-vectorized) vs. looped results agree.
+    """Batched (broadcast-vectorized) vs. looped results agree.
 
     This library batches over cells via direct broadcasting rather than
-    ``jax.vmap`` (Section 17.1's stated preference), so this compares the
+    ``jax.vmap``, so this compares the
     library's batched per-cell local matrices against an independent
     Python loop that builds one cell's CellBasis and local matrix at a
     time, on a small heterogeneous set of affine triangles.
@@ -170,8 +160,8 @@ def test_python_loop_matches_batched_local_stiffness_assembly() -> None:
     basis = create_cell_basis(space, quadrature)
     coefficients = _make_coefficients(basis)
     batched_local_matrices = integrate_cellwise(
-        elliptic_bilinear_form(basis, coefficients), basis.physical_weights
-    )  # (K, 3, 3)
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
 
     looped_local_matrices = []
     for cell in cells:
@@ -180,7 +170,7 @@ def test_python_loop_matches_batched_local_stiffness_assembly() -> None:
         one_quadrature = one_space.element.reference_cell.create_quadrature(3)
         one_basis = create_cell_basis(one_space, one_quadrature)
         one_coefficients = _make_coefficients(one_basis)
-        one_pointwise = elliptic_bilinear_form(one_basis, one_coefficients)
+        one_pointwise = elliptic_bilinear_form(one_basis, one_basis, one_coefficients)
         one_local = integrate_cellwise(one_pointwise, one_basis.physical_weights)[0]
         looped_local_matrices.append(one_local)
     looped_local_matrices = jnp.stack(looped_local_matrices)
@@ -193,7 +183,7 @@ def test_python_loop_matches_batched_local_stiffness_assembly() -> None:
 
 @pytest.mark.jax
 def test_autodiff_of_assembled_matrix_matches_finite_difference() -> None:
-    """JAX-04: assembly is differentiable w.r.t. a coefficient parameter (Section 17.3).
+    """Assembly is differentiable w.r.t. a coefficient parameter.
 
     Differentiates a scalar reduction of the assembled stiffness matrix
     with respect to a diffusion scale ``alpha`` (``A = alpha * I``) and
@@ -210,7 +200,10 @@ def test_autodiff_of_assembled_matrix_matches_finite_difference() -> None:
             dirichlet_conditions=(),
         )
         coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-        matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
+        local_matrices = integrate_cellwise(
+            elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+        )
+        matrix = assemble_matrix(local_matrices, basis.space, basis.space)
         return jnp.sum(matrix.todense())
 
     alpha0 = 1.7

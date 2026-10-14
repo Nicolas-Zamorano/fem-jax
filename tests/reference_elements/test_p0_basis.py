@@ -1,7 +1,4 @@
-"""Tests for the scalar discontinuous P0 (piecewise-constant) element.
-
-See Section 5.2 of the implementation plan (``.context/implementation_plan.md``).
-"""
+"""Tests for the scalar piecewise-constant P0 element."""
 
 import jax.numpy as jnp
 import pytest
@@ -19,7 +16,7 @@ def p0_element() -> PiecewiseConstantTriangleP0:
 def test_p0_basis_values_shape_and_constant(p0_element) -> None:
     points = jnp.array(
         [[[[0.1, 0.2]], [[0.5, 0.4]], [[0.9, 0.05]]]]
-    )  # (1, 3, 1, 2)
+    )
     values = p0_element.tabulate_basis_values(points)
     assert values.shape == (1, 3, 1, 1)
     assert jnp.all(values == 1.0)

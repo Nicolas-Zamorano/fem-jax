@@ -1,10 +1,7 @@
-"""Tests for the pure (Gmsh-free) AMR marking and sizing layer.
+"""Tests for the AMR marking and sizing functions.
 
-See Section 4.2 of the implementation plan (``.context/implementation_plan.md``,
-the AMR stretch item): ``mark_cells_by_dorfler_bulk_criterion`` and
-``compute_target_cell_sizes`` are ordinary JAX functions, unit-testable
-without Gmsh at all -- the Gmsh-only bridge is exercised separately in
-``test_amr_gmsh_integration.py``.
+``mark_cells_by_dorfler_bulk_criterion`` and ``compute_target_cell_sizes`` are
+plain JAX functions, testable without Gmsh.
 """
 
 import jax.numpy as jnp
@@ -105,3 +102,15 @@ def test_target_sizes_rejects_refinement_factor_outside_open_unit_interval(
         compute_target_cell_sizes(
             mesh, jnp.array([True, False]), refinement_factor=refinement_factor
         )
+
+
+@pytest.mark.unit
+def test_dorfler_marking_accepts_per_cell_shape() -> None:
+    """Indicators of shape (K, 1, 1, 1) give the same flat mask as (K,)."""
+    indicators = jnp.array([0.3, 2.0, 0.1, 1.2, 0.7])
+    flat_mask = mark_cells_by_dorfler_bulk_criterion(indicators, theta=0.6)
+    per_cell_mask = mark_cells_by_dorfler_bulk_criterion(
+        jnp.expand_dims(indicators, axis=(-3, -2, -1)), theta=0.6
+    )
+    assert per_cell_mask.shape == (5,)
+    assert jnp.array_equal(per_cell_mask, flat_mask)

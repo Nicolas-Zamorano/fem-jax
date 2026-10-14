@@ -1,8 +1,4 @@
-"""Tests for CellBasis's contravariant-Piola mapping (RT0) and its
-interaction with P0.
-
-See Section 5.2 of the implementation plan (``.context/implementation_plan.md``).
-"""
+"""Tests for CellBasis's contravariant Piola mapping (RT0) and its use with P0."""
 
 import jax.numpy as jnp
 import pytest
@@ -95,7 +91,7 @@ def test_rt0_physical_flux_is_continuous_across_reversed_orientation_facet() -> 
         jacobian = basis.jacobians[cell_index, 0]
         inverse_jacobian = basis.inverse_jacobians[cell_index, 0]
         reference_point = ((midpoint - origin) @ inverse_jacobian.T).reshape(1, 1, 1, 2)
-        reference_values = element.tabulate_basis_values(reference_point)[0, 0]  # (3,2)
+        reference_values = element.tabulate_basis_values(reference_point)[0, 0]
         determinant = basis.jacobian_determinants[cell_index, 0, 0, 0]
         physical_values = (reference_values @ jacobian.T) / determinant
         signs = space.local_dof_signs[cell_index]

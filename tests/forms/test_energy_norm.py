@@ -1,12 +1,9 @@
-"""Energy-norm identity test.
-
-See Section 13 (energy-norm assumptions) of the FEM testing plan, ELL-05.
-"""
+"""Energy-norm identity test."""
 
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form
+from jax_fem.assembly import assemble_matrix, integrate_cellwise
 from jax_fem.diagnostics import compute_energy_error
 from jax_fem.forms import elliptic_bilinear_form
 from jax_fem.function import FiniteElementFunction
@@ -29,12 +26,12 @@ from jax_fem.space import (
 def test_energy_identity_matches_bilinear_form_and_hard_coded_value(
     four_triangle_center_vertex_mesh, p1_element
 ) -> None:
-    """ELL-05: ``a(v_h, v_h) == ||v_h||_E^2 == 25/6`` for the center hat function.
+    """``a(v_h, v_h) == ||v_h||_E^2 == 25/6`` for the center hat function.
 
     ``A = I``, ``beta = (x, y)`` so ``div(beta) = 2`` and the symmetrized
     reaction is ``c - div(beta)/2 = 2 - 1 = 1``. For the center hat
     function, ``int |grad v_h|^2 = 4`` and ``int v_h^2 = 1/6``, giving
-    ``||v_h||_E^2 = 4 + 1/6 = 25/6`` (the testing plan's hard-coded value).
+    ``||v_h||_E^2 = 4 + 1/6 = 25/6``.
 
     Computed two independent ways: ``U^T A_h U`` through the assembled
     bilinear-form matrix, and the energy functional through
@@ -71,7 +68,10 @@ def test_energy_identity_matches_bilinear_form_and_hard_coded_value(
     energy_norm_squared_via_functional = compute_energy_error(v_h, basis, problem) ** 2
 
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
     energy_norm_squared_via_bilinear_form = float(
         (v_h.dof_values.T @ (matrix @ v_h.dof_values))[0, 0]
     )

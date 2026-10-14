@@ -1,8 +1,7 @@
 """Integration tests for ``adapt_mesh_from_error_estimator``.
 
-See ``context/in_house_amr_implementation_plan.md``. ``mark_cells_by_dorfler_bulk_criterion``
-is tested Gmsh-free in ``test_amr_marking.py`` and the pure LEB refinement
-engine in ``test_leb_refinement.py``; this file exercises the public,
+``mark_cells_by_dorfler_bulk_criterion`` is tested in ``test_amr_marking.py``
+and the LEB refinement in ``test_leb_refinement.py``; this file exercises the public,
 domain-agnostic entry point end to end on both the Gmsh unit-square and
 L-shaped domain factories -- the whole point of replacing Gmsh background
 size fields with an in-house LEB engine is that AMR is no longer tied to

@@ -14,21 +14,28 @@ from jax_fem.space.finite_element_space import FiniteElementSpace
 
 @dataclasses.dataclass(frozen=True, slots=True, eq=False)
 class FiniteElementFunction:
-    """One particular function ``u_h = sum_i U_i Phi_i`` in a ``FiniteElementSpace``.
-
-    ``dof_values`` is always the complete vector, including constrained
-    Dirichlet DOFs.
+    """
+    A function ``u_h = sum_i U_i phi_i`` in a finite element space.
 
     Attributes
     ----------
     space : FiniteElementSpace
-        The finite element space this function belongs to.
+        The space the function belongs to.
     dof_values : jax.Array
-        The complete global DOF vector, shape ``(N_dofs, 1)``.
+        Complete global DOF vector, including Dirichlet DOFs, shape
+        ``(dofs_test, 1)``.
     """
 
     space: FiniteElementSpace
     dof_values: jax.Array
 
     def __post_init__(self) -> None:
+        """
+        Validate the shape of ``dof_values``.
+
+        Raises
+        ------
+        ValueError
+            If ``dof_values`` is not ``(space.number_of_dofs, 1)``.
+        """
         check_shape(self.dof_values, (self.space.number_of_dofs, 1), "dof_values")

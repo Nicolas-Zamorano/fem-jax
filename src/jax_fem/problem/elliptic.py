@@ -1,6 +1,5 @@
-"""Elliptic PDE problem data and coefficient evaluation.
-
-See Sections 12.1 and 12.3 of the architecture specification.
+"""
+Elliptic PDE problem data and coefficient evaluation.
 """
 
 from __future__ import annotations
@@ -17,56 +16,71 @@ from jax_fem._shapes import check_shape
 if TYPE_CHECKING:
     from jax_fem.problem.boundary_conditions import DirichletCondition
 
-#: A coefficient callable contract (Section 6.5): evaluated at physical
-#: points of shape ``(*batch, 1, d)``, returning:
-#:   scalar:  ``(*batch, 1, 1)``
-#:   vector:  ``(*batch, 1, d)``
-#:   tensor:  ``(*batch, d, d)``
-#: The three aliases below are structurally identical Python types; they
-#: exist to document which return shape each ``EllipticProblem`` field
-#: expects.
+#: Coefficient callables take physical points of shape ``(*batch, 1, d)`` and
+#: return ``(*batch, 1, 1)`` (scalar), ``(*batch, 1, d)`` (vector), or
+#: ``(*batch, d, d)`` (tensor). The three aliases are the same Python type and
+#: only document which shape each ``EllipticProblem`` field returns.
 ScalarCoefficient: TypeAlias = Callable[[jax.Array], jax.Array]
 VectorCoefficient: TypeAlias = Callable[[jax.Array], jax.Array]
 TensorCoefficient: TypeAlias = Callable[[jax.Array], jax.Array]
 
 
+def zero_scalar_coefficient(points: jax.Array) -> jax.Array:
+    """
+    Scalar coefficient equal to zero everywhere.
+
+    Parameters
+    ----------
+    points : jax.Array
+        Physical points, shape ``(*batch, 1, d)``.
+
+    Returns
+    -------
+    values : jax.Array
+        Zeros, shape ``(*batch, 1, 1)``.
+    """
+    return jnp.zeros(points.shape[:-1] + (1,), dtype=points.dtype)
+
+
 @dataclasses.dataclass(frozen=True, slots=True, eq=False)
 class EllipticProblem:
-    """PDE coefficient and boundary data, independent of mesh, element, or quadrature.
-
-    Stores coefficient **functions**, not values evaluated on a specific
-    ``CellBasis`` (Section 12.1). The problem being discretized is the
-    general second-order elliptic equation (Section 2):
-
-    ``-div(A grad u) + beta . grad u + c u = f``  in the domain,
-    ``u = g``  on the boundary.
+    """
+    Coefficient and boundary data of a second-order elliptic problem.
 
     Attributes
     ----------
+    diffusion : TensorCoefficient
+        Diffusion tensor ``A(x)``.
+    advection : VectorCoefficient
+        Advection field ``beta(x)``.
+    reaction : ScalarCoefficient
+        Reaction coefficient ``c(x)``.
+    source : ScalarCoefficient
+        Source term ``f(x)``.
+    dirichlet_conditions : tuple[DirichletCondition, ...]
+        Dirichlet boundary tags and their value functions.
+    exact_solution : ScalarCoefficient | None
+        Exact solution ``u``, for manufactured problems and error
+        computation; not needed to solve.
+    exact_gradient : VectorCoefficient | None
+        Exact gradient ``grad u``, for the same purpose.
+    advection_divergence : ScalarCoefficient
+        Divergence ``div(beta)(x)`` of the advection field. Defaults to zero.
     name : str
-        Name of the problem
-    diffusion:
-        ``A(x)``, a ``TensorCoefficient``.
-    advection:
-        ``beta(x)``, a ``VectorCoefficient``.
-    reaction:
-        ``c(x)``, a ``ScalarCoefficient``.
-    source:
-        ``f(x)``, a ``ScalarCoefficient``.
-    dirichlet_conditions:
-        Which mesh boundary tags are Dirichlet and their value functions.
-    exact_solution:
-        Optional exact ``u`` for manufactured examples and error
-        computation. Not required to solve the problem.
-    exact_gradient:
-        Optional exact ``grad u``, for the same purpose.
-    advection_divergence:
-        Optional ``div(beta)(x)``, a ``ScalarCoefficient``. Not required to
-        solve the problem or to assemble any form: it exists solely for the
-        energy-norm error diagnostic (``diagnostics.compute_energy_error``),
-        whose coercive energy identity ``a(v, v) = ||v||_E^2`` needs the
-        symmetrized reaction coefficient ``c - div(beta)/2``. Same optional,
-        diagnostics-only status as ``exact_solution``/``exact_gradient``.
+        Name of the problem.
+
+    Notes
+    -----
+    The problem is ``-div(A grad u) + beta . grad u + c u = f`` in the
+    domain and ``u = g`` on the Dirichlet boundary. The fields store
+    coefficient functions, not values evaluated on a particular basis.
+
+    ``advection_divergence`` enters the symmetrized reaction
+    ``c - div(beta) / 2`` used by the energy inner product and the energy
+    error. The zero default is exact whenever ``div(beta) == 0`` (no
+    advection, constant advection, or any divergence-free field). For an
+    advection field with nonzero divergence it must be given; otherwise the
+    energy form and the energy error are silently wrong.
     """
 
     diffusion: TensorCoefficient
@@ -76,50 +90,55 @@ class EllipticProblem:
     dirichlet_conditions: tuple[DirichletCondition, ...]
     exact_solution: ScalarCoefficient | None = None
     exact_gradient: VectorCoefficient | None = None
-    advection_divergence: ScalarCoefficient | None = None
+    advection_divergence: ScalarCoefficient = zero_scalar_coefficient
     name: str = "elliptic_problem"
 
 
 class EllipticCoefficientValues(NamedTuple):
-    """Elliptic coefficients evaluated at a batch of physical points.
+    """
+    Elliptic coefficients evaluated at a batch of physical points.
 
     Attributes
     ----------
-    diffusion:
-        Shape ``(*batch, d, d)``.
-    advection:
-        Shape ``(*batch, 1, d)``.
-    reaction:
-        Shape ``(*batch, 1, 1)``.
-    source:
-        Shape ``(*batch, 1, 1)``.
+    diffusion : jax.Array
+        Diffusion tensor, shape ``(*batch, d, d)``.
+    advection : jax.Array
+        Advection field, shape ``(*batch, 1, d)``.
+    reaction : jax.Array
+        Reaction coefficient, shape ``(*batch, 1, 1)``.
+    source : jax.Array
+        Source term, shape ``(*batch, 1, 1)``.
+    advection_divergence : jax.Array
+        Divergence of the advection field, shape ``(*batch, 1, 1)``.
     """
 
     diffusion: jax.Array
     advection: jax.Array
     reaction: jax.Array
     source: jax.Array
+    advection_divergence: jax.Array
 
 
 def evaluate_elliptic_coefficients(
     problem: EllipticProblem, physical_points: jax.Array
 ) -> EllipticCoefficientValues:
-    """Evaluate all four elliptic coefficients at a batch of physical points.
+    """
+    Evaluate the elliptic coefficients at a batch of physical points.
 
     Parameters
     ----------
-    problem:
+    problem : EllipticProblem
         The problem whose coefficient functions to evaluate.
-    physical_points:
-        Shape ``(*batch, 1, d)``. For cell quadrature evaluation,
-        ``*batch = (K, Q)`` (Section 6.5).
+    physical_points : jax.Array
+        Physical points, shape ``(*batch, 1, d)``; ``*batch`` is ``(K, Q)``
+        for cell quadrature points.
 
     Returns
     -------
-    EllipticCoefficientValues
-        Shapes follow Section 6 exactly; see the class docstring.
+    coefficients : EllipticCoefficientValues
+        The evaluated coefficients, with shapes as documented on
+        ``EllipticCoefficientValues``.
     """
-
     batch_shape = physical_points.shape[:-2]
     dimension = physical_points.shape[-1]
 
@@ -127,33 +146,88 @@ def evaluate_elliptic_coefficients(
     advection = problem.advection(physical_points)
     reaction = problem.reaction(physical_points)
     source = problem.source(physical_points)
+    advection_divergence = problem.advection_divergence(physical_points)
 
     check_shape(diffusion, (*batch_shape, dimension, dimension), "diffusion(...)")
     check_shape(advection, (*batch_shape, 1, dimension), "advection(...)")
     check_shape(reaction, (*batch_shape, 1, 1), "reaction(...)")
     check_shape(source, (*batch_shape, 1, 1), "source(...)")
+    check_shape(
+        advection_divergence, (*batch_shape, 1, 1), "advection_divergence(...)"
+    )
 
     return EllipticCoefficientValues(
-        diffusion=diffusion, advection=advection, reaction=reaction, source=source
+        diffusion=diffusion,
+        advection=advection,
+        reaction=reaction,
+        source=source,
+        advection_divergence=advection_divergence,
     )
 
 
 def constant_scalar_coefficient(value: float) -> ScalarCoefficient:
-    """Build a ``ScalarCoefficient`` constant in space, shape ``(*batch, 1, 1)``."""
+    """
+    Scalar coefficient with a constant value.
+
+    Parameters
+    ----------
+    value : float
+        The constant value.
+
+    Returns
+    -------
+    coefficient : ScalarCoefficient
+        Callable returning ``value`` with shape ``(*batch, 1, 1)``.
+    """
 
     def coefficient(points: jax.Array) -> jax.Array:
+        """
+        Evaluate the constant at physical points.
+
+        Parameters
+        ----------
+        points : jax.Array
+            Physical points, shape ``(*batch, 1, d)``.
+
+        Returns
+        -------
+        values : jax.Array
+            Constant values, shape ``(*batch, 1, 1)``.
+        """
         return jnp.full(points.shape[:-1] + (1,), value)
 
     return coefficient
 
 
 def constant_vector_coefficient(vector: jax.Array) -> VectorCoefficient:
-    """Build a ``VectorCoefficient`` constant in space, shape ``(*batch, 1, d)``.
+    """
+    Vector coefficient with a constant value.
 
-    ``vector`` must have shape ``(d,)``.
+    Parameters
+    ----------
+    vector : jax.Array
+        The constant vector, shape ``(d,)``.
+
+    Returns
+    -------
+    coefficient : VectorCoefficient
+        Callable returning ``vector`` with shape ``(*batch, 1, d)``.
     """
 
     def coefficient(points: jax.Array) -> jax.Array:
+        """
+        Evaluate the constant at physical points.
+
+        Parameters
+        ----------
+        points : jax.Array
+            Physical points, shape ``(*batch, 1, d)``.
+
+        Returns
+        -------
+        values : jax.Array
+            Constant vectors, shape ``(*batch, 1, d)``.
+        """
         dimension = points.shape[-1]
         return jnp.broadcast_to(jnp.asarray(vector), points.shape[:-2] + (1, dimension))
 
@@ -161,12 +235,34 @@ def constant_vector_coefficient(vector: jax.Array) -> VectorCoefficient:
 
 
 def constant_tensor_coefficient(tensor: jax.Array) -> TensorCoefficient:
-    """Build a ``TensorCoefficient`` constant in space, shape ``(*batch, d, d)``.
+    """
+    Tensor coefficient with a constant value.
 
-    ``tensor`` must have shape ``(d, d)``.
+    Parameters
+    ----------
+    tensor : jax.Array
+        The constant tensor, shape ``(d, d)``.
+
+    Returns
+    -------
+    coefficient : TensorCoefficient
+        Callable returning ``tensor`` with shape ``(*batch, d, d)``.
     """
 
     def coefficient(points: jax.Array) -> jax.Array:
+        """
+        Evaluate the constant at physical points.
+
+        Parameters
+        ----------
+        points : jax.Array
+            Physical points, shape ``(*batch, 1, d)``.
+
+        Returns
+        -------
+        values : jax.Array
+            Constant tensors, shape ``(*batch, d, d)``.
+        """
         dimension = points.shape[-1]
         return jnp.broadcast_to(
             jnp.asarray(tensor), points.shape[:-2] + (dimension, dimension)
@@ -176,16 +272,35 @@ def constant_tensor_coefficient(tensor: jax.Array) -> TensorCoefficient:
 
 
 def isotropic_tensor_coefficient(scalar: ScalarCoefficient) -> TensorCoefficient:
-    """Lift a scalar coefficient ``a(x)`` to the isotropic tensor ``a(x) * I``.
+    """
+    Isotropic tensor coefficient ``a(x) I`` from a scalar coefficient.
 
-    Used when a scalar (rather than fully anisotropic) diffusion coefficient
-    is more natural to specify, e.g. for manufactured problems
-    (``problem/manufactured.py``).
+    Parameters
+    ----------
+    scalar : ScalarCoefficient
+        Scalar coefficient ``a(x)``.
+
+    Returns
+    -------
+    coefficient : TensorCoefficient
+        Callable returning ``a(x) I`` with shape ``(*batch, d, d)``.
     """
 
     def coefficient(points: jax.Array) -> jax.Array:
+        """
+        Evaluate ``a(x) I`` at physical points.
+
+        Parameters
+        ----------
+        points : jax.Array
+            Physical points, shape ``(*batch, 1, d)``.
+
+        Returns
+        -------
+        values : jax.Array
+            Isotropic tensors, shape ``(*batch, d, d)``.
+        """
         dimension = points.shape[-1]
-        scalar_values = scalar(points)  # (*batch, 1, 1)
-        return scalar_values * jnp.eye(dimension)
+        return scalar(points) * jnp.eye(dimension)
 
     return coefficient

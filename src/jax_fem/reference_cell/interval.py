@@ -1,6 +1,5 @@
-"""The canonical reference interval, used for 1D facet quadrature.
-
-See Section 4.2 of the implementation plan (``.context/implementation_plan.md``).
+"""
+The reference interval, used for facet quadrature.
 """
 
 from __future__ import annotations
@@ -15,12 +14,10 @@ from jax_fem.reference_cell.quadrature import (
     create_interval_quadrature,
 )
 
-# The standard reference interval [0, 1].
 _VERTEX_COORDINATES = ((0.0,), (1.0,))
 
-# The "facets" of a 1D cell are its two endpoints (0-dimensional points).
-# Not exercised by facet-jump computations (only 2D triangle facets --
-# edges -- are), but completes the ReferenceCell protocol.
+# The facets of a 1D cell are its two endpoints; they complete the
+# ReferenceCell protocol but are not used by facet integration.
 _FACETS_TO_VERTICES = ((0,), (1,))
 _FACET_NORMALS = ((-1.0,), (1.0,))
 
@@ -29,27 +26,27 @@ _MEASURE = 1.0
 
 @dataclasses.dataclass(frozen=True, slots=True, eq=False)
 class ReferenceInterval:
-    """The standard reference interval ``[0, 1]``.
-
-    Used as the reference cell for 1D facet quadrature (``FacetBasis``):
-    every mesh facet of a ``TriangleMesh`` is a straight line segment, whose
-    reference parameterization is this interval. Stores only geometric and
-    topological reference data, matching ``ReferenceTriangle``'s role for
-    2D cells (Section 8.2); the class takes no constructor arguments.
+    """
+    The reference interval ``[0, 1]``.
 
     Attributes
     ----------
-    dimension:
+    dimension : int
         Always ``1``.
-    vertex_coordinates:
-        Reference endpoint coordinates, shape ``(2, 1)``.
-    facets_to_vertices:
-        Local vertex index of each reference endpoint, shape ``(2, 1)``.
-    facet_normals:
-        Outward unit "normal" (direction) of each reference endpoint, shape
-        ``(2, 1)``.
-    measure:
-        Exact length of the reference interval, ``1.0``.
+    vertex_coordinates : jax.Array
+        Endpoint coordinates, shape ``(2, 1)``.
+    facets_to_vertices : jax.Array
+        Local vertex index of each endpoint, shape ``(2, 1)``.
+    facet_normals : jax.Array
+        Outward unit direction at each endpoint, shape ``(2, 1)``.
+    measure : float
+        Length of the interval, ``1.0``.
+
+    Notes
+    -----
+    Every facet of a ``TriangleMesh`` is a straight segment parameterized by
+    this interval, so it is the reference cell of ``FacetBasis`` quadrature.
+    The class takes no constructor arguments.
     """
 
     dimension: int = dataclasses.field(default=1, init=False)
@@ -66,8 +63,18 @@ class ReferenceInterval:
     measure: float = dataclasses.field(default=_MEASURE, init=False)
 
     def create_quadrature(self, exactness_degree: int) -> QuadratureRule:
-        """Return an interval quadrature rule exact to at least ``exactness_degree``.
+        """
+        Quadrature rule on this interval.
 
-        See ``create_interval_quadrature`` for the exactness-selection rule.
+        Parameters
+        ----------
+        exactness_degree : int
+            Minimum polynomial exactness degree, at least one.
+
+        Returns
+        -------
+        quadrature : QuadratureRule
+            Rule exact to at least ``exactness_degree`` (see
+            ``create_interval_quadrature``).
         """
         return create_interval_quadrature(self, exactness_degree)

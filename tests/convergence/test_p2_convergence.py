@@ -1,12 +1,9 @@
 """Uniform-refinement convergence study for the P2 discretization.
 
-See Section 3.5 of the implementation plan (``.context/implementation_plan.md``).
 Mirrors ``test_elliptic_convergence.py``'s P1 study; P2 theory predicts one
 extra order in each norm:
 
-    ||u - u_h||_L2 = O(h^3), |u - u_h|_H1 = O(h)^2
-
-SOL-04 of the FEM testing plan, P2 case.
+    ||u - u_h||_L2 = O(h^3), |u - u_h|_H1 = O(h^2)
 """
 
 import math
@@ -14,7 +11,7 @@ import math
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
@@ -56,8 +53,14 @@ def _solve_and_measure_errors(
     basis = create_cell_basis(space, quadrature)
 
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values

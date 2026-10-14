@@ -3,24 +3,19 @@
 Verification happens at two independent levels:
 
 1. Continuous, autodiff-based: ``exact_gradient`` is checked against
-   ``jax.grad`` of ``exact_solution``, and ``source`` is checked against the
-   strong-form residual ``-div(A grad u) + beta . grad u + c u`` computed via
-   ``jax.jacobian``/``jax.hessian`` of the coefficient and solution
-   functions. This never touches the mesh/FEM machinery, so it isolates
-   translation mistakes in the manufactured math itself.
-2. Discrete: one coarse FEM solve per problem, checking the computed L2/H1
-   errors are small (and, for the smooth problems, converge at the expected
-   P1 rate -- see ``test_elliptic_convergence.py`` for the full-rate study).
-
-ELL-04 of the FEM testing plan (variable-coefficient manufactured problem)
-is covered by ``SimpleEllipticProblem`` here.
+   ``jax.grad`` of ``exact_solution``, and ``source`` against the strong-form
+   residual ``-div(A grad u) + beta . grad u + c u`` computed with
+   ``jax.jacobian``/``jax.hessian``. This never touches the FEM machinery, so
+   it isolates mistakes in the manufactured formulas.
+2. Discrete: one coarse FEM solve per problem, checking that the L2/H1 errors
+   are small (see ``test_elliptic_convergence.py`` for the full-rate study).
 """
 
 import jax
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
@@ -92,17 +87,17 @@ def _strong_form_residual(problem: EllipticProblem, point: jax.Array) -> jax.Arr
         return problem.exact_solution(_as_batch(p))[0, 0, 0]
 
     def a_matrix(p: jax.Array) -> jax.Array:
-        return problem.diffusion(_as_batch(p))[0]  # (2, 2)
+        return problem.diffusion(_as_batch(p))[0]
 
     def beta_vector(p: jax.Array) -> jax.Array:
-        return problem.advection(_as_batch(p))[0, 0]  # (2,)
+        return problem.advection(_as_batch(p))[0, 0]
 
     def c_scalar(p: jax.Array) -> jax.Array:
         return problem.reaction(_as_batch(p))[0, 0, 0]
 
-    grad_u = jax.grad(u_scalar)(point)  # (2,)
-    hess_u = jax.hessian(u_scalar)(point)  # (2, 2)
-    jac_a = jax.jacobian(a_matrix)(point)  # (2, 2, 2): d A_ij / d x_k
+    grad_u = jax.grad(u_scalar)(point)
+    hess_u = jax.hessian(u_scalar)(point)
+    jac_a = jax.jacobian(a_matrix)(point)  # d A_ij / d x_k
 
     # div(A grad u) = sum_ij d(A_ij du/dx_j)/dx_i
     #              = sum_ij [dA_ij/dx_i * du/dx_j + A_ij * d2u/(dx_i dx_j)]
@@ -154,8 +149,14 @@ def test_dirichlet_values_equal_exact_solution_at_boundary(name: str) -> None:
 
 def _solve(problem: EllipticProblem, space, basis) -> FiniteElementFunction:
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values
@@ -200,7 +201,7 @@ def test_discrete_solve_error_is_small(
 
 
 # ---------------------------------------------------------------------------
-# L-shaped re-entrant-corner singular problem (Section 4.3): a distinct
+# L-shaped re-entrant-corner singular problem: a distinct
 # domain from every problem above, so it gets its own small, self-contained
 # set of checks rather than being shoehorned into _MESH/_SAMPLE_POINTS
 # (which assume the unit square).
@@ -237,7 +238,7 @@ def test_l_shaped_singular_exact_gradient_matches_autodiff() -> None:
 def test_l_shaped_singular_vanishes_on_reentrant_corner_edges() -> None:
     """The exact solution vanishes identically on the two straight edges
     meeting at the re-entrant corner (the positive x-axis and negative
-    y-axis), a standard feature of this benchmark (Section 4.3)."""
+    y-axis), a standard feature of this benchmark."""
     problem = create_poisson_l_shaped_singular_problem(
         create_gmsh_l_shaped_mesh(1.0)
     )

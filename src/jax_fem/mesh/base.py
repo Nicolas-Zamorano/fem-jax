@@ -14,8 +14,6 @@ class Mesh(Protocol):
     """
     Geometry and topology of a physical mesh.
 
-    A ``Mesh`` owns mesh geometry, topology, and physical/boundary tags.
-
     Attributes
     ----------
     geometric_dimension : int
@@ -27,6 +25,10 @@ class Mesh(Protocol):
         ``(N_vertices, 1, geometric_dimension)``.
     cells_to_vertices : jax.Array
         Vertex indices of every cell, shape ``(K, n_vertices_per_cell)``.
+
+    Notes
+    -----
+    A mesh owns its geometry, topology, and physical and boundary tags.
     """
 
     geometric_dimension: int

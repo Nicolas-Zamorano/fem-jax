@@ -1,7 +1,6 @@
-"""Tests for the in-memory Gmsh domain factories and mesh hierarchies.
+"""Tests for the Gmsh domain factories and mesh hierarchies.
 
-See Section 2 of the implementation plan (``.context/implementation_plan.md``):
-exact integer boundary tagging, ``create_gmsh_unit_square_mesh``,
+Covers exact integer boundary tagging, ``create_gmsh_unit_square_mesh``,
 ``create_gmsh_l_shaped_mesh``, and ``create_gmsh_mesh_hierarchy``.
 """
 
@@ -143,7 +142,8 @@ def test_hierarchy_preserves_boundary_tags_and_orientation() -> None:
 def test_hierarchy_works_for_l_shaped_geometry_builder() -> None:
     meshes = create_gmsh_mesh_hierarchy(l_shaped_gmsh_geometry, 0.4, levels=1)
     assert len(meshes) == 2
-    assert meshes[1].cells_to_vertices.shape[0] == 4 * meshes[0].cells_to_vertices.shape[0]
+    coarse_cells = meshes[0].cells_to_vertices.shape[0]
+    assert meshes[1].cells_to_vertices.shape[0] == 4 * coarse_cells
     for mesh in meshes:
         assert set(mesh.boundary_tag_names) == {"boundary"}
 

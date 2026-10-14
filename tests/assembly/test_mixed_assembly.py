@@ -1,16 +1,13 @@
-"""Tests for mixed-space (rectangular) and block saddle-point assembly.
-
-See Section 5.3 of the implementation plan (``.context/implementation_plan.md``).
-"""
+"""Tests for two-space (rectangular) and block saddle-point assembly."""
 
 import jax.numpy as jnp
 import pytest
 
 from jax_fem.assembly import (
-    assemble_bilinear_form,
-    assemble_linear_form,
-    assemble_mixed_bilinear_form,
+    assemble_matrix,
     assemble_mixed_system,
+    assemble_vector,
+    integrate_cellwise,
 )
 from jax_fem.element import PiecewiseConstantTriangleP0, RaviartThomasTriangleRT0
 from jax_fem.forms import elliptic_linear_form
@@ -42,6 +39,13 @@ def _spaces_and_bases(degree: int = 4):
     return mesh, space_sigma, space_u, basis_sigma, basis_u
 
 
+def _divergence_matrix(basis_u, basis_sigma):
+    local_matrices = integrate_cellwise(
+        elliptic_mixed_div_form(basis_u, basis_sigma, None), basis_u.physical_weights
+    )
+    return assemble_matrix(local_matrices, basis_u.space, basis_sigma.space)
+
+
 def _zero_advection_reaction_problem(source_value: float = 1.0) -> EllipticProblem:
     return EllipticProblem(
         diffusion=constant_tensor_coefficient(jnp.eye(2)),
@@ -53,28 +57,21 @@ def _zero_advection_reaction_problem(source_value: float = 1.0) -> EllipticProbl
 
 
 @pytest.mark.unit
-def test_assemble_mixed_bilinear_form_is_rectangular() -> None:
+def test_two_space_matrix_is_rectangular() -> None:
     _, space_sigma, space_u, basis_sigma, basis_u = _spaces_and_bases()
-    div_matrix = assemble_mixed_bilinear_form(
-        elliptic_mixed_div_form, basis_u, basis_sigma
-    )
+    div_matrix = _divergence_matrix(basis_u, basis_sigma)
     assert div_matrix.shape == (space_u.number_of_dofs, space_sigma.number_of_dofs)
 
 
 @pytest.mark.unit
-def test_assemble_mixed_bilinear_form_matches_manual_scatter() -> None:
-    """ASM-02-style (adapted): the mixed assembler's scatter against a plain
-    Python loop over cells, independent of its own vectorized construction.
-    """
+def test_two_space_matrix_matches_manual_scatter() -> None:
+    """The two-space assembly against a plain Python loop over cells."""
     _, space_sigma, space_u, basis_sigma, basis_u = _spaces_and_bases()
-    div_matrix = assemble_mixed_bilinear_form(
-        elliptic_mixed_div_form, basis_u, basis_sigma
+    div_matrix = _divergence_matrix(basis_u, basis_sigma)
+
+    local_matrices = integrate_cellwise(
+        elliptic_mixed_div_form(basis_u, basis_sigma, None), basis_u.physical_weights
     )
-
-    from jax_fem.assembly.integration import integrate_cellwise
-
-    pointwise = elliptic_mixed_div_form(basis_u, basis_sigma)
-    local_matrices = integrate_cellwise(pointwise, basis_u.physical_weights)  # (K,1,3)
 
     dense_reference = jnp.zeros((space_u.number_of_dofs, space_sigma.number_of_dofs))
     for cell_index in range(space_u.cells_to_dofs.shape[0]):
@@ -83,7 +80,7 @@ def test_assemble_mixed_bilinear_form_matches_manual_scatter() -> None:
                 global_i = int(space_u.cells_to_dofs[cell_index, local_i])
                 global_j = int(space_sigma.cells_to_dofs[cell_index, local_j])
                 dense_reference = dense_reference.at[global_i, global_j].add(
-                    local_matrices[cell_index, local_i, local_j]
+                    local_matrices[cell_index, 0, local_i, local_j]
                 )
 
     assert jnp.allclose(div_matrix.todense(), dense_reference, atol=1e-13)
@@ -117,12 +114,15 @@ def test_assemble_mixed_system_block_shapes_and_structure() -> None:
     coefficients_sigma = evaluate_elliptic_coefficients(
         problem, basis_sigma.physical_points
     )
-    expected_m = assemble_bilinear_form(
-        elliptic_mixed_mass_form, basis_sigma, coefficients_sigma
+    expected_m = assemble_matrix(
+        integrate_cellwise(
+            elliptic_mixed_mass_form(basis_sigma, basis_sigma, coefficients_sigma),
+            basis_sigma.physical_weights,
+        ),
+        basis_sigma.space,
+        basis_sigma.space,
     ).todense()
-    expected_b = assemble_mixed_bilinear_form(
-        elliptic_mixed_div_form, basis_u, basis_sigma
-    ).todense()
+    expected_b = _divergence_matrix(basis_u, basis_sigma).todense()
     assert jnp.allclose(m_block, expected_m, atol=1e-13)
     assert jnp.allclose(b_block, expected_b, atol=1e-13)
 
@@ -138,7 +138,10 @@ def test_assemble_mixed_system_rhs_is_zero_sigma_block_plus_load_vector() -> Non
     assert jnp.allclose(rhs[:n_sigma], 0.0, atol=1e-14)
 
     coefficients_u = evaluate_elliptic_coefficients(problem, basis_u.physical_points)
-    expected_load = assemble_linear_form(elliptic_linear_form, basis_u, coefficients_u)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis_u, coefficients_u), basis_u.physical_weights
+    )
+    expected_load = assemble_vector(local_vectors, basis_u.space)
     assert jnp.allclose(rhs[n_sigma:], expected_load, atol=1e-13)
 
 
@@ -152,7 +155,6 @@ def test_assemble_mixed_system_is_solvable_and_gives_finite_solution() -> None:
     solution = jnp.linalg.solve(block_matrix.todense(), rhs)
     assert jnp.all(jnp.isfinite(solution))
 
-    # Residual sanity: a genuine linear-solve check (SOL-03-style), not just
-    # "didn't crash".
+    # A genuine linear-solve residual check, not just "didn't crash".
     residual = block_matrix @ solution - rhs
     assert float(jnp.linalg.norm(residual)) < 1e-9

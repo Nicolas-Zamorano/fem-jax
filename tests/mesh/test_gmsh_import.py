@@ -1,6 +1,6 @@
 """Tests for Gmsh model and .msh import paths (Sections 7.3, 7.4).
 
-``gmsh`` is a required core dependency (Section 2.1), so these tests need no
+``gmsh`` is a required core dependency, so these tests need no
 optional-dependency skip guard.
 """
 

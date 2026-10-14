@@ -1,15 +1,13 @@
 """Condensed-system algebraic residual test.
 
-See Section 15.2 of the architecture specification; SOL-03 of the FEM
-testing plan. This is not a test of a solver supplied by the library
-(Section 15.3): it only checks consistency between assembly, condensation,
-a user-computed free solution, and reconstruction.
+The library supplies no solver: this checks consistency between assembly,
+condensation, a user-computed free solution, and reconstruction.
 """
 
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     expand_condensed_solution,
@@ -45,18 +43,24 @@ def _make_laplacian_matrix_and_vector():
         dirichlet_conditions=(),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     return matrix, vector
 
 
 @pytest.mark.integration
 @pytest.mark.end_to_end
 def test_condensed_system_residual_is_small_relative_to_problem_scale() -> None:
-    """SOL-03: ||A_ff u_f - F_f|| is small relative to the matrix/solution/RHS norms.
+    """||A_ff u_f - F_f|| is small relative to the matrix/solution/RHS norms.
 
     A relative, backward-error-style tolerance rather than an unscaled
-    absolute number (per the testing plan): the residual is compared
+    absolute number: the residual is compared
     against ``||A_ff|| ||u_f|| + ||F_f||``, not a bare epsilon.
     """
     matrix, vector = _make_laplacian_matrix_and_vector()

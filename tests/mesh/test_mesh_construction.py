@@ -1,9 +1,4 @@
-"""Tests for TriangleMesh construction from arrays.
-
-See Section 7.3 of the architecture specification. Facet-topology and
-boundary-tagging correctness is groundwork the FEM testing plan's DOF/GEO
-categories build on, but isn't itself one of the plan's named test IDs.
-"""
+"""Tests for TriangleMesh construction: facet topology and boundary tagging."""
 
 import jax.numpy as jnp
 import pytest

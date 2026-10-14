@@ -1,5 +1,5 @@
 """
-Gmsh model and ``.msh`` file import paths, and in-memory Gmsh domain factories.
+Gmsh import of meshes and Gmsh-built standard domains.
 """
 
 from __future__ import annotations
@@ -32,7 +32,19 @@ _L_SHAPE_VERTICES = (
 
 
 def _import_gmsh() -> Any:
-    """Import and return the ``gmsh`` module, with a friendly error if missing."""
+    """
+    Import the ``gmsh`` module.
+
+    Returns
+    -------
+    gmsh : module
+        The imported ``gmsh`` module.
+
+    Raises
+    ------
+    ImportError
+        If ``gmsh`` is not installed.
+    """
     try:
         import gmsh
     except ImportError as error:
@@ -45,33 +57,26 @@ def _import_gmsh() -> Any:
 
 def create_triangle_mesh_from_gmsh_model(model: Any) -> TriangleMesh:
     """
-    Build a ``TriangleMesh`` from a live, already-meshed Gmsh model.
-
-    The model must already have a linear (order-1) 2D mesh generated, e.g.
-    via ``gmsh.model.mesh.generate(2)``. Boundary facets are tagged from the
-    model's 1D physical groups (physical curves), matched **exactly** against
-    mesh facets via canonical integer node-index pairs (no coordinate
-    tolerance involved): a physical curve's line elements are remapped
-    through the same node-tag-to-vertex-index table used for triangle
-    connectivity, canonicalized as ``(min(index_a, index_b),
-    max(index_a, index_b))``, and looked up directly against
-    ``facets_to_vertices``. If the model has no 1D physical groups, every
-    boundary facet receives the single default tag (Section 7.3). If the
-    model has 2D physical groups (physical surfaces), each cell's
-    ``cell_tags`` entry is set to the raw Gmsh physical tag of the surface it
-    belongs to, or ``-1`` if untagged.
+    Build a triangular mesh from a meshed Gmsh model.
 
     Parameters
     ----------
-    model:
-        An object with the same interface as the ``gmsh.model`` submodule
-        (``mesh.getNodes``, ``mesh.getElementsByType``, ``getPhysicalGroups``,
-        ``getPhysicalName``, ``getEntitiesForPhysicalGroup``). Once imported,
-        the returned ``TriangleMesh`` is independent of the live model.
+    model : Any
+        An object with the interface of ``gmsh.model`` holding a linear 2D
+        mesh (e.g. after ``gmsh.model.mesh.generate(2)``).
 
     Returns
     -------
-    TriangleMesh
+    mesh : TriangleMesh
+        The mesh, independent of the live model.
+
+    Notes
+    -----
+    Boundary facets are tagged from the model's 1D physical groups, matched
+    exactly by canonical vertex-index pairs (no coordinate tolerance). Without
+    1D physical groups every boundary facet gets the default tag. With 2D
+    physical groups, each cell's tag is the Gmsh physical tag of its surface,
+    or ``-1`` if untagged.
     """
     element_tags, triangle_node_tags = _get_triangle_elements(model)
     tag_to_coords = _get_node_coordinates(model)
@@ -110,16 +115,17 @@ def create_triangle_mesh_from_gmsh_model(model: Any) -> TriangleMesh:
 
 def read_triangle_mesh_from_msh(path: str | os.PathLike[str]) -> TriangleMesh:
     """
-    Read a ``TriangleMesh`` directly from a Gmsh ``.msh`` file.
+    Read a triangular mesh from a Gmsh ``.msh`` file.
 
     Parameters
     ----------
-    path: str | os.PathLike[str]
-        Path to a ``.msh`` file.
+    path : str | os.PathLike[str]
+        Path to the ``.msh`` file.
 
     Returns
     -------
-    TriangleMesh
+    mesh : TriangleMesh
+        The mesh.
     """
     gmsh = _import_gmsh()
 
@@ -137,17 +143,19 @@ def read_triangle_mesh_from_msh(path: str | os.PathLike[str]) -> TriangleMesh:
 
 def _get_triangle_elements(model: Any) -> tuple[np.ndarray, np.ndarray]:
     """
-    Get triangle elements from a Gmsh model.
+    Triangle elements of a Gmsh model.
 
     Parameters
     ----------
-    model
-        Gmsh model.
+    model : Any
+        The Gmsh model.
 
     Returns
     -------
-    tags : tuple[np.ndarray, np.ndarray]
-        Element tags and node tags.
+    element_tags : np.ndarray
+        Gmsh tag of each triangle, shape ``(K,)``.
+    triangle_node_tags : np.ndarray
+        Gmsh node tags of each triangle, shape ``(K, 3)``.
     """
     element_tags, node_tags_flat = model.mesh.getElementsByType(
         _TRIANGLE_ELEMENT_TYPE
@@ -157,7 +165,7 @@ def _get_triangle_elements(model: Any) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError(
             "The Gmsh model has no 3-node triangle elements. Call "
             "gmsh.model.mesh.generate(2) with a linear (order-1) mesh "
-            "before importing (Section 7.4)."
+            "before importing."
         )
     triangle_node_tags = np.asarray(node_tags_flat, dtype=np.int64).reshape(-1, 3)
     return element_tags, triangle_node_tags
@@ -165,17 +173,17 @@ def _get_triangle_elements(model: Any) -> tuple[np.ndarray, np.ndarray]:
 
 def _get_node_coordinates(model: Any) -> dict[int, tuple[float, float]]:
     """
-    Get node coordinates from a Gmsh model.
+    Node coordinates of a planar Gmsh model.
 
     Parameters
     ----------
-    model
-        Gmsh model.
+    model : Any
+        The Gmsh model.
 
     Returns
     -------
     tag_to_coords : dict[int, tuple[float, float]]
-        Dictionary mapping node tags to coordinates.
+        Gmsh node tag to ``(x, y)`` coordinates.
     """
     node_tags, node_coords_flat, _ = model.mesh.getNodes()
     node_tags = np.asarray(node_tags, dtype=np.int64)
@@ -184,8 +192,7 @@ def _get_node_coordinates(model: Any) -> dict[int, tuple[float, float]]:
     if node_coords.shape[0] > 0 and not np.allclose(node_coords[:, 2], 0.0):
         raise ValueError(
             "The Gmsh model is not planar (found nonzero z coordinates). "
-            "Only 2D straight-sided triangular meshes are supported "
-            "(Section 2.1)."
+            "Only 2D straight-sided triangular meshes are supported."
         )
 
     return {
@@ -200,29 +207,27 @@ def _exact_boundary_tags_from_physical_curves(
     mesh: TriangleMesh,
 ) -> tuple[np.ndarray, dict[str, int]] | None:
     """
-    Tag ``mesh``'s boundary facets from the model's 1D physical curves.
-
-    Matches each physical curve's line elements against boundary facets by
-    exact canonical integer vertex-index pair -- both sides derive from the
-    same ``node_tag_to_index`` remap, so this is an exact lookup, not a
-    coordinate-tolerance comparison.
+    Boundary facet tags from the model's 1D physical curves.
 
     Parameters
     ----------
-    model:
+    model : Any
         The Gmsh model.
-    node_tag_to_index:
-        Gmsh node tag -> this mesh's compact vertex index, as built by
-        ``create_triangle_mesh_from_gmsh_model``.
-    mesh:
-        The already-constructed ``TriangleMesh`` (with default boundary
-        tagging) whose facets are to be retagged.
+    node_tag_to_index : dict[int, int]
+        Gmsh node tag to the mesh's vertex index.
+    mesh : TriangleMesh
+        The mesh whose boundary facets are tagged.
 
     Returns
     -------
-    tuple[np.ndarray, dict[str, int]] | None
-        ``(boundary_facet_tags, boundary_tag_names)`` if the model has any
-        1D physical groups, else ``None``.
+    boundary_tags : tuple[np.ndarray, dict[str, int]] | None
+        ``(boundary_facet_tags, boundary_tag_names)``, or ``None`` if the
+        model has no 1D physical groups.
+
+    Notes
+    -----
+    Line elements and mesh facets are matched by canonical vertex-index
+    pairs built from the same node remap, so the lookup is exact.
     """
     physical_groups = model.getPhysicalGroups(dim=1)
     if not physical_groups:
@@ -249,7 +254,7 @@ def _exact_boundary_tags_from_physical_curves(
                 edge_to_name[canonical] = name
 
     boundary_facets = np.asarray(mesh.boundary_facets)
-    facets_to_vertices = np.asarray(mesh.facets_to_vertices)  # already (low, high)
+    facets_to_vertices = np.asarray(mesh.facets_to_vertices)
     boundary_facet_vertex_pairs = facets_to_vertices[boundary_facets]
 
     tags = np.full(boundary_facets.shape[0], -1, dtype=np.int64)
@@ -270,6 +275,22 @@ def _exact_boundary_tags_from_physical_curves(
 def _cell_tags_from_physical_surfaces(
     model: Any, element_tags: np.ndarray
 ) -> np.ndarray | None:
+    """
+    Cell tags from the model's 2D physical surfaces.
+
+    Parameters
+    ----------
+    model : Any
+        The Gmsh model.
+    element_tags : np.ndarray
+        Gmsh tag of each triangle, shape ``(K,)``.
+
+    Returns
+    -------
+    cell_tags : np.ndarray | None
+        Physical tag of each cell, ``-1`` if untagged, shape ``(K,)``; or
+        ``None`` if the model has no 2D physical groups.
+    """
     physical_groups = model.getPhysicalGroups(dim=2)
     if not physical_groups:
         return None
@@ -290,31 +311,28 @@ def _cell_tags_from_physical_surfaces(
     )
 
 
-# ---------------------------------------------------------------------------
-# In-memory geometry builders: construct + mesh a domain in the *current*,
-# already-initialized Gmsh session, leaving the session open. Each is usable
-# either directly (see ``create_gmsh_unit_square_mesh`` /
-# ``create_gmsh_l_shaped_mesh``, which own the session lifecycle around one
-# call) or as the ``geometry_builder`` passed to ``create_gmsh_mesh_hierarchy``,
-# which owns the session across several ``gmsh.model.mesh.refine()`` calls.
-# ---------------------------------------------------------------------------
+# Geometry builders mesh a domain in the current Gmsh session and leave it
+# open, so they can be used directly or as the ``geometry_builder`` of
+# ``create_gmsh_mesh_hierarchy``.
 
 
 def unit_square_gmsh_geometry(gmsh_module: Any, number_of_cells_per_side: int) -> None:
     """
-    Build and mesh the unit square ``[0, 1]^2`` in the current Gmsh session.
-
-    Uses the ``geo`` kernel. Tags physical curves ``"bottom"`` (``y = 0``),
-    ``"right"`` (``x = 1``), ``"top"`` (``y = 1``), ``"left"`` (``x = 0``),
-    and physical surface ``"domain"``.
+    Build and mesh the unit square in the current Gmsh session.
 
     Parameters
     ----------
-    gmsh_module:
-        The (already-initialized) ``gmsh`` module.
-    number_of_cells_per_side:
-        Target number of cells along each side, at least 1; converted to a
-        target mesh element size ``1 / number_of_cells_per_side``.
+    gmsh_module : Any
+        The initialized ``gmsh`` module.
+    number_of_cells_per_side : int
+        Target number of cells along each side, at least one; the element
+        size is ``1 / number_of_cells_per_side``.
+
+    Notes
+    -----
+    Uses the ``geo`` kernel and tags the physical curves ``"bottom"``
+    (``y = 0``), ``"right"`` (``x = 1``), ``"top"`` (``y = 1``), ``"left"``
+    (``x = 0``) and the physical surface ``"domain"``.
     """
     if number_of_cells_per_side < 1:
         raise ValueError(
@@ -352,34 +370,28 @@ def l_shaped_gmsh_geometry(
     size_field_builder: Callable[[Any], None] | None = None,
 ) -> None:
     """
-    Build and mesh the re-entrant L-shaped domain in the current Gmsh session.
-
-    Domain: ``[-1, 1]^2 \\ [0, 1] x [-1, 0]``, with a genuine 270-degree
-    re-entrant corner at the origin. Uses the ``occ`` kernel. Tags a single
-    physical curve ``"boundary"`` covering the whole boundary, and physical
-    surface ``"domain"``.
+    Build and mesh the L-shaped domain in the current Gmsh session.
 
     Parameters
     ----------
-    gmsh_module:
-        The (already-initialized) ``gmsh`` module.
-    target_h:
-        Target mesh element size, greater than 0, used as a uniform
-        per-point mesh size. Required when ``size_field_builder`` is not
-        given; ignored (points left at their unconstrained default, ``0.0``)
-        when it is -- see ``size_field_builder`` below.
-    size_field_builder:
-        Optional callback ``(gmsh_module) -> None``, invoked after physical
-        groups are tagged and before ``gmsh_module.model.mesh.generate(2)``,
-        to install a background mesh size field (e.g.
-        ``jax_fem.mesh.amr``'s adaptive size field). When given, CAD points
-        are left at mesh size ``0.0`` (Gmsh's "unconstrained" sentinel) and
-        ``Mesh.MeshSizeFromPoints`` / ``Mesh.MeshSizeExtendFromBoundary`` are
-        both disabled, so the field is the *sole* authority over element
-        sizes -- otherwise Gmsh takes the minimum of point-prescribed and
-        field-prescribed sizes at every location, which can silently keep a
-        coarse point size from being refined away, including at the
-        re-entrant corner itself (a CAD point here).
+    gmsh_module : Any
+        The initialized ``gmsh`` module.
+    target_h : float | None
+        Uniform target element size, positive; required unless
+        ``size_field_builder`` is given.
+    size_field_builder : Callable[[Any], None] | None
+        Callback that installs a background mesh size field before meshing.
+
+    Notes
+    -----
+    The domain is ``[-1, 1]^2 \\ [0, 1] x [-1, 0]`` with a 270-degree
+    re-entrant corner at the origin. Uses the ``occ`` kernel and tags one
+    physical curve ``"boundary"`` and the physical surface ``"domain"``.
+
+    With ``size_field_builder``, CAD points get Gmsh's unconstrained size
+    ``0.0`` and sizing from points and boundaries is disabled, so the field
+    alone sets the element sizes; otherwise Gmsh would take the minimum of
+    the point and field sizes, which can keep a coarse size at the corner.
     """
     if size_field_builder is None:
         if target_h is None or target_h <= 0.0:
@@ -419,11 +431,23 @@ def l_shaped_gmsh_geometry(
 
 
 def run_in_owned_gmsh_session(build: Callable[[Any], None]) -> Any:
-    """Run ``build(gmsh_module)`` in a session this call owns, then extract.
+    """
+    Run a geometry builder in a Gmsh session and import the result.
 
-    Initializes Gmsh only if no session is already open (so this composes
-    with an outer caller -- e.g. ``create_gmsh_mesh_hierarchy`` -- that
-    already owns a live session), and only finalizes what it itself opened.
+    Parameters
+    ----------
+    build : Callable[[Any], None]
+        Callback ``build(gmsh_module)`` that builds and meshes a domain.
+
+    Returns
+    -------
+    mesh : TriangleMesh
+        The imported mesh.
+
+    Notes
+    -----
+    Gmsh is initialized only if no session is open, and only a session
+    opened here is finalized, so the call composes with an outer session.
     """
     gmsh_module = _import_gmsh()
     already_initialized = bool(gmsh_module.isInitialized())
@@ -440,21 +464,18 @@ def run_in_owned_gmsh_session(build: Callable[[Any], None]) -> Any:
 
 def create_gmsh_unit_square_mesh(number_of_cells_per_side: int) -> TriangleMesh:
     """
-    Build a ``TriangleMesh`` of the unit square ``[0, 1]^2`` via Gmsh.
-
-    Replaces the earlier structured (non-Gmsh) unit-square generator: Gmsh is
-    the library's sole meshing engine for standard domains (Section 2.1).
-    Boundary facets are tagged ``"bottom"`` (``y = 0``), ``"right"``
-    (``x = 1``), ``"top"`` (``y = 1``), ``"left"`` (``x = 0``).
+    Mesh of the unit square built with Gmsh.
 
     Parameters
     ----------
-    number_of_cells_per_side:
-        Target number of cells along each side, at least 1.
+    number_of_cells_per_side : int
+        Target number of cells along each side, at least one.
 
     Returns
     -------
-    TriangleMesh
+    mesh : TriangleMesh
+        The mesh, with boundary tags ``"bottom"``, ``"right"``, ``"top"``,
+        and ``"left"``.
     """
     return run_in_owned_gmsh_session(
         lambda gmsh_module: unit_square_gmsh_geometry(
@@ -465,21 +486,18 @@ def create_gmsh_unit_square_mesh(number_of_cells_per_side: int) -> TriangleMesh:
 
 def create_gmsh_l_shaped_mesh(target_h: float) -> TriangleMesh:
     """
-    Build a ``TriangleMesh`` of the re-entrant L-shaped domain via Gmsh.
-
-    Domain: ``[-1, 1]^2 \\ [0, 1] x [-1, 0]``, with a genuine 270-degree
-    re-entrant corner at the origin -- the standard benchmark domain for
-    ``problem.create_poisson_l_shaped_singular_problem``. Every boundary
-    facet is tagged ``"boundary"``.
+    Mesh of the L-shaped domain built with Gmsh.
 
     Parameters
     ----------
-    target_h:
-        Target mesh element size, greater than 0.
+    target_h : float
+        Target element size, positive.
 
     Returns
     -------
-    TriangleMesh
+    mesh : TriangleMesh
+        The mesh of ``[-1, 1]^2 \\ [0, 1] x [-1, 0]``, with every boundary
+        facet tagged ``"boundary"``.
     """
     return run_in_owned_gmsh_session(
         lambda gmsh_module: l_shaped_gmsh_geometry(gmsh_module, target_h)
@@ -492,37 +510,32 @@ def create_gmsh_mesh_hierarchy(
     levels: int,
 ) -> list[TriangleMesh]:
     """
-    Build a hierarchy of exact 1-to-4 uniformly refined ``TriangleMesh``\\ es.
-
-    ``TriangleMesh`` is a pure, immutable data snapshot with no reference
-    back to its originating CAD geometry, so refining an already-exported
-    mesh directly is not possible. Instead, this function owns one live Gmsh
-    session end to end: it runs ``geometry_builder(gmsh_module,
-    base_resolution)`` once to build and mesh the coarsest level, exports it,
-    then repeatedly calls ``gmsh.model.mesh.refine()`` (exact 1-to-4 red
-    bisection, preserving physical group tags) and exports each subsequent
-    level, before finalizing the session.
+    Uniformly refined mesh hierarchy built with Gmsh.
 
     Parameters
     ----------
-    geometry_builder:
-        A function ``(gmsh_module, base_resolution) -> None`` that builds a
-        domain's geometry, tags its physical groups, and calls
-        ``gmsh_module.model.mesh.generate(2)``, leaving the session open
-        afterward -- e.g. ``unit_square_gmsh_geometry`` or
-        ``l_shaped_gmsh_geometry``.
-    base_resolution:
-        The level-0 resolution argument passed to ``geometry_builder`` (an
-        ``int`` cell count or a ``float`` target mesh size, depending on the
-        builder).
-    levels:
-        Number of additional refinement levels beyond level 0, at least 0.
-        Level ``i`` has exactly ``4**i`` times as many cells as level 0.
+    geometry_builder : Callable[[Any, Any], None]
+        Callback ``(gmsh_module, base_resolution)`` that builds and meshes a
+        domain and leaves the session open, e.g. ``unit_square_gmsh_geometry``
+        or ``l_shaped_gmsh_geometry``.
+    base_resolution : Any
+        Level-0 resolution passed to ``geometry_builder`` (a cell count or an
+        element size, depending on the builder).
+    levels : int
+        Number of refinement levels after level 0, at least zero.
 
     Returns
     -------
-    list[TriangleMesh]
-        ``levels + 1`` meshes, coarsest (level 0) first.
+    meshes : list[TriangleMesh]
+        ``levels + 1`` meshes, coarsest first; level ``i`` has ``4**i`` times
+        as many cells as level 0.
+
+    Notes
+    -----
+    A ``TriangleMesh`` keeps no link to its CAD geometry, so the hierarchy is
+    built in one Gmsh session: the coarsest level is meshed once, then
+    ``gmsh.model.mesh.refine()`` (exact 1-to-4 splitting that keeps physical
+    groups) produces each further level.
     """
     if levels < 0:
         raise ValueError(f"levels must be non-negative, got {levels}.")

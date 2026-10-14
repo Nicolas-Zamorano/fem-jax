@@ -1,22 +1,10 @@
 """
-Adaptive mesh refinement (AMR) driven by the residual error estimator.
+Adaptive mesh refinement: Dorfler marking and longest-edge bisection.
 
-Given per-cell indicators ``eta_K`` from
-``jax_fem.diagnostics.compute_residual_error_estimator``, mark cells for
-refinement (Dorfler bulk criterion) and refine the marked region with an
-in-house Rivara Longest Edge Bisection (LEB) engine -- a pure
-``TriangleMesh`` -> ``TriangleMesh`` transformation operating directly on
-host vertex/connectivity arrays, with no external meshing engine involved.
-See ``context/in_house_amr_implementation_plan.md`` for the full
-algorithmic derivation.
-
-Split into a pure-JAX marking layer (``mark_cells_by_dorfler_bulk_criterion``,
-unit-testable on its own) and an eager-NumPy refinement engine
-(``refine_mesh_longest_edge_bisection``): mesh topology mutation here is
-inherently sequential and data-dependent (recursive longest-edge
-propagation), so it runs as ordinary host code rather than under
-``jax.jit``, mirroring the eager/host style already used for Gmsh import
-elsewhere in ``jax_fem.mesh``.
+Marking (``mark_cells_by_dorfler_bulk_criterion``) is pure JAX. Refinement
+(``refine_mesh_longest_edge_bisection``) is a Rivara longest-edge bisection
+written as eager host code, because its recursive propagation is sequential
+and data dependent.
 """
 
 from __future__ import annotations
@@ -50,31 +38,36 @@ def mark_cells_by_dorfler_bulk_criterion(
     Parameters
     ----------
     cell_indicators : jax.Array
-        Per-cell indicators ``eta_K``, shape ``(K,)`` (e.g. from
-        ``compute_residual_error_estimator``).
+        Per-cell indicators ``eta_K``, shape ``(K, 1, 1, 1)`` (as returned by
+        ``compute_residual_error_estimator``) or ``(K,)``.
     theta : float
         Bulk fraction, in ``(0, 1]``. Larger marks more cells; ``theta = 1``
         marks every cell (equivalent to uniform refinement).
 
     Returns
     -------
-    jax.Array
+    marked_cells : jax.Array
         Boolean mask, shape ``(K,)``, ``True`` for marked cells.
+
+    Notes
+    -----
+    The mask is flat because it feeds the host-side refinement in
+    ``refine_mesh_longest_edge_bisection``.
     """
     if not (0.0 < theta <= 1.0):
         raise ValueError(f"theta must be in (0, 1], got {theta}.")
 
-    squared_indicators = cell_indicators**2
-    order = jnp.argsort(squared_indicators)[::-1]  # descending
+    squared_indicators = jnp.ravel(cell_indicators) ** 2
+    order = jnp.flip(jnp.argsort(squared_indicators))
     cumulative = jnp.cumsum(squared_indicators[order])
     target = theta * jnp.sum(squared_indicators)
 
-    # Smallest prefix length M such that cumulative[:M] >= target (searchsorted
-    # on a non-decreasing array finds the first index whose value is >= target).
+    # searchsorted on the non-decreasing cumulative sum finds the first prefix
+    # that reaches the target.
     number_marked = jnp.searchsorted(cumulative, target) + 1
-    number_marked = jnp.minimum(number_marked, cell_indicators.shape[0])
+    number_marked = jnp.minimum(number_marked, squared_indicators.shape[-1])
 
-    rank = jnp.argsort(order)  # rank[i] = position of cell i in the sorted order
+    rank = jnp.argsort(order)
     return rank < number_marked
 
 
@@ -84,10 +77,7 @@ def compute_target_cell_sizes(
     refinement_factor: float = 0.5,
 ) -> jax.Array:
     """
-    Target per-cell element size for the next AMR iteration.
-
-    Marked cells shrink to ``h_K * refinement_factor``; unmarked cells keep
-    their current diameter ``h_K`` (``jax_fem.mesh.triangle.cell_diameters``).
+    Target cell sizes for the next refinement step.
 
     Parameters
     ----------
@@ -102,8 +92,13 @@ def compute_target_cell_sizes(
 
     Returns
     -------
-    jax.Array
+    target_sizes : jax.Array
         Target sizes, shape ``(K,)``.
+
+    Notes
+    -----
+    Marked cells get ``h_K * refinement_factor``; unmarked cells keep their
+    diameter ``h_K``.
     """
     if not (0.0 < refinement_factor < 1.0):
         raise ValueError(
@@ -114,7 +109,21 @@ def compute_target_cell_sizes(
 
 
 def _canonical_edge(vertex_a: int, vertex_b: int) -> tuple[int, int]:
-    """Sort a vertex-index pair into ``(low, high)`` canonical order."""
+    """
+    Order a vertex pair as ``(low, high)``.
+
+    Parameters
+    ----------
+    vertex_a : int
+        First vertex index.
+    vertex_b : int
+        Second vertex index.
+
+    Returns
+    -------
+    edge : tuple[int, int]
+        The two indices in increasing order.
+    """
     return (vertex_a, vertex_b) if vertex_a < vertex_b else (vertex_b, vertex_a)
 
 
@@ -122,13 +131,21 @@ def _cell_longest_edge(
     cell: tuple[int, int, int], vertices: list[tuple[float, float]]
 ) -> tuple[int, int, int]:
     """
-    A cell's opposite-vertex/longest-edge decomposition.
+    Longest edge of a cell and its opposite vertex.
 
-    Returns ``(opposite, edge_start, edge_end)``: a cyclic rotation of
-    ``cell`` (so still in ``cell``'s own counter-clockwise winding order)
-    with ``opposite`` the vertex not on the longest edge and
-    ``(edge_start, edge_end)`` its two endpoints, traversed in ``cell``'s
-    own orientation.
+    Parameters
+    ----------
+    cell : tuple[int, int, int]
+        Vertex indices of the cell.
+    vertices : list[tuple[float, float]]
+        Vertex coordinates.
+
+    Returns
+    -------
+    rotation : tuple[int, int, int]
+        ``(opposite, edge_start, edge_end)``, a cyclic rotation of ``cell``
+        whose last two entries span the longest edge, in the cell's own
+        orientation.
     """
     v0, v1, v2 = cell
     rotations = ((v0, v1, v2), (v1, v2, v0), (v2, v0, v1))
@@ -140,38 +157,29 @@ def refine_mesh_longest_edge_bisection(
     mesh: TriangleMesh, marked_cells: jax.Array
 ) -> TriangleMesh:
     r"""
-    Rivara Longest Edge Bisection (LEB) refinement of the marked cells.
-
-    A pure ``TriangleMesh`` -> ``TriangleMesh`` transformation: every marked
-    cell is split in two along its longest edge, with recursive
-    ("matching") propagation into neighbors whenever the shared edge is not
-    also *their* longest edge -- the classical construction that guarantees
-    strict :math:`H^1` conformity (zero hanging nodes) and preserves shape
-    regularity (Rivara, 1984). ``mesh`` itself is never mutated.
-
-    Runs as eager host NumPy code: the propagation loop is sequential and
-    data-dependent, not a shape suited to ``jax.jit``/``vmap``. An explicit
-    LIFO stack (rather than Python recursion) drives the propagation, so
-    long chains cannot raise ``RecursionError``.
-
-    Boundary facet tags and physical cell tags are propagated to child
-    cells/sub-facets; vertices/cells untouched by refinement are carried
-    through unchanged.
+    Rivara longest-edge bisection of the marked cells.
 
     Parameters
     ----------
     mesh : TriangleMesh
-        The mesh to refine.
+        The mesh to refine; it is not modified.
     marked_cells : jax.Array
-        Boolean mask, shape ``(K,)`` (e.g. from
-        ``mark_cells_by_dorfler_bulk_criterion``), ``True`` for cells to
-        refine.
+        Boolean mask of cells to refine, shape ``(K,)``.
 
     Returns
     -------
-    TriangleMesh
-        A new, independent, refined ``TriangleMesh``. If no cell is marked,
-        ``mesh`` is returned unchanged.
+    refined_mesh : TriangleMesh
+        A new refined mesh, or ``mesh`` itself if no cell is marked.
+
+    Notes
+    -----
+    Each marked cell is split along its longest edge. When the shared edge
+    is not also the neighbour's longest edge, the neighbour is refined first,
+    which keeps the mesh conforming (no hanging nodes) and shape regular
+    (Rivara, 1984). The propagation uses an explicit stack, so long chains
+    cannot hit Python's recursion limit. Boundary and cell tags are passed
+    on to the children. The routine is eager host code, not traceable by
+    ``jax.jit``.
     """
     return _refine_mesh_longest_edge_bisection(
         mesh, marked_cells, max_bisections=None
@@ -182,11 +190,26 @@ def _refine_mesh_longest_edge_bisection(
     mesh: TriangleMesh, marked_cells: jax.Array, *, max_bisections: int | None
 ) -> TriangleMesh:
     """
-    ``refine_mesh_longest_edge_bisection``, with an overridable bisection
-    cap -- factored out so the defensive termination guard is directly
-    unit-testable without needing a mesh large enough to trigger it
-    naturally (which the algorithm's own termination proof makes
-    impractical to construct).
+    Longest-edge bisection with an optional cap on the number of bisections.
+
+    Parameters
+    ----------
+    mesh : TriangleMesh
+        The mesh to refine.
+    marked_cells : jax.Array
+        Boolean mask of cells to refine, shape ``(K,)``.
+    max_bisections : int | None
+        Bisection cap; ``None`` uses ``4 K``.
+
+    Returns
+    -------
+    refined_mesh : TriangleMesh
+        The refined mesh, or ``mesh`` if no cell is marked.
+
+    Notes
+    -----
+    The cap is a defensive termination guard; exposing it lets the guard be
+    tested without a mesh large enough to trigger it.
     """
     marked_indices = [int(i) for i in np.flatnonzero(np.asarray(marked_cells))]
     if not marked_indices:
@@ -194,7 +217,7 @@ def _refine_mesh_longest_edge_bisection(
 
     vertices: list[tuple[float, float]] = [
         (float(x), float(y))
-        for x, y in np.asarray(mesh.vertex_coordinates[:, 0, :])
+        for x, y in np.asarray(jnp.squeeze(mesh.vertex_coordinates, axis=-2))
     ]
     cells: list[tuple[int, int, int] | None] = [
         tuple(int(v) for v in row) for row in np.asarray(mesh.cells_to_vertices)
@@ -219,6 +242,19 @@ def _refine_mesh_longest_edge_bisection(
     edge_to_cells: dict[tuple[int, int], list[int]] = {}
 
     def _cell_edges(cell: tuple[int, int, int]) -> tuple[tuple[int, int], ...]:
+        """
+        Canonical edges of a cell, ordered by opposite local vertex.
+
+        Parameters
+        ----------
+        cell : tuple[int, int, int]
+            Vertex indices of the cell.
+
+        Returns
+        -------
+        edges : tuple[tuple[int, int], ...]
+            The three canonical edges.
+        """
         v0, v1, v2 = cell
         return (
             _canonical_edge(v1, v2),
@@ -231,6 +267,21 @@ def _refine_mesh_longest_edge_bisection(
             edge_to_cells.setdefault(edge, []).append(cell_index)
 
     def _find_neighbor(cell_index: int, edge: tuple[int, int]) -> int | None:
+        """
+        The other cell sharing an edge.
+
+        Parameters
+        ----------
+        cell_index : int
+            The cell whose neighbour is wanted.
+        edge : tuple[int, int]
+            Canonical edge shared with the neighbour.
+
+        Returns
+        -------
+        neighbor : int | None
+            The neighbouring cell, or ``None`` on the boundary.
+        """
         others = [c for c in edge_to_cells.get(edge, ()) if c != cell_index]
         return others[0] if others else None
 
@@ -239,6 +290,19 @@ def _refine_mesh_longest_edge_bisection(
     bisection_count = 0
 
     def _bisect(cell_index: int) -> None:
+        """
+        Split a cell in two along its longest edge.
+
+        Parameters
+        ----------
+        cell_index : int
+            The cell to split; it is retired and replaced by two children.
+
+        Raises
+        ------
+        RuntimeError
+            If the number of bisections exceeds the cap.
+        """
         nonlocal bisection_count
         cell = cells[cell_index]
         assert cell is not None
@@ -258,7 +322,7 @@ def _refine_mesh_longest_edge_bisection(
 
         for edge in _cell_edges(cell):
             edge_to_cells[edge].remove(cell_index)
-        cells[cell_index] = None  # retire; never referenced again
+        cells[cell_index] = None
 
         tag = cell_tags[cell_index] if cell_tags is not None else None
         for child in (child_1, child_2):
@@ -310,8 +374,8 @@ def _refine_mesh_longest_edge_bisection(
                     neighbor_cell, vertices
                 )
                 if _canonical_edge(neighbor_start, neighbor_end) != edge_key:
-                    # e is not neighbor's own longest edge: resolve it first
-                    # (recursive propagation via the explicit stack).
+                    # The shared edge is not the neighbour's longest edge:
+                    # refine the neighbour first.
                     stack.append(neighbor_index)
                     continue
                 neighbor_needs_matching_bisect = True
@@ -345,28 +409,21 @@ def adapt_mesh_from_error_estimator(
     mesh: TriangleMesh, cell_indicators: jax.Array, theta: float = 0.5
 ) -> TriangleMesh:
     r"""
-    One adaptive refinement iteration: Dorfler-mark, then LEB-bisect.
-
-    Fully domain-agnostic: ``refine_mesh_longest_edge_bisection`` is a pure
-    ``TriangleMesh`` -> ``TriangleMesh`` transformation with no reference to
-    how ``mesh`` was originally built, so this works identically for the
-    unit square, the L-shaped domain, or any other mesh.
+    One adaptive step: Dorfler marking followed by longest-edge bisection.
 
     Parameters
     ----------
     mesh : TriangleMesh
-        The mesh ``cell_indicators`` was computed on.
+        The mesh the indicators were computed on; it is not modified.
     cell_indicators : jax.Array
-        Per-cell error indicators ``eta_K``, shape ``(K,)`` (e.g. from
-        ``compute_residual_error_estimator``).
+        Per-cell indicators ``eta_K``, shape ``(K, 1, 1, 1)`` or ``(K,)``.
     theta : float
         Dorfler bulk fraction, in ``(0, 1]``.
 
     Returns
     -------
-    TriangleMesh
-        A new, independent, refined ``TriangleMesh``; ``mesh`` is left
-        untouched.
+    refined_mesh : TriangleMesh
+        The refined mesh.
     """
     marked_cells = mark_cells_by_dorfler_bulk_criterion(cell_indicators, theta)
     return refine_mesh_longest_edge_bisection(mesh, marked_cells)

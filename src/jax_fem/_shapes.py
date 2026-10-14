@@ -1,6 +1,5 @@
-"""Internal shape-checking helper used by dataclasses' ``__post_init__``.
-
-Not part of the public API.
+"""
+Internal shape checking used by dataclass validation.
 """
 
 from __future__ import annotations
@@ -11,7 +10,8 @@ import jax
 def check_shape(
     array: jax.Array, expected: tuple[int | None, ...], name: str
 ) -> None:
-    """Raise ``ValueError`` unless ``array.shape`` matches ``expected``.
+    """
+    Check the shape of an array.
 
     Parameters
     ----------
@@ -23,9 +23,10 @@ def check_shape(
     name : str
         A label for ``array`` used in the raised error message.
 
-    Returns
-    -------
-    None
+    Raises
+    ------
+    ValueError
+        If ``array.shape`` does not match ``expected``.
     """
     if len(array.shape) != len(expected) or any(
         expected_size is not None and actual_size != expected_size

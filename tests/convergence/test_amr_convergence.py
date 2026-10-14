@@ -1,29 +1,22 @@
 """Closed-loop AMR study on the L-shaped re-entrant-corner singular problem.
 
-See Section 4.2 and 4.4 of the implementation plan
-(``.context/implementation_plan.md``, the AMR stretch item) and
-``context/in_house_amr_implementation_plan.md``: a full
-solve -> estimate -> adapt loop, using the classical residual estimator
-(``diagnostics.compute_residual_error_estimator``) to drive the in-house
-LEB engine (``mesh.adapt_mesh_from_error_estimator``).
+A full solve -> estimate -> adapt loop: the residual estimator
+(``diagnostics.compute_residual_error_estimator``) drives longest-edge
+bisection (``mesh.adapt_mesh_from_error_estimator``).
 
-Unlike ``tests/convergence/test_residual_estimator_convergence.py`` (which
-checks a *tight*, monotonic uniform-refinement rate), this only checks the
-robust, honest signal available from a handful of AMR iterations on small,
-pre-asymptotic meshes: the mesh grows every iteration, and the global
-estimator ends up smaller than it started. Per-iteration eta is *not*
-asserted monotonic -- Dorfler marking on a very coarse starting mesh can
-transiently increase eta before the adaptive loop settles into a
-decreasing trend, which is expected, not a defect. Quantitatively
-confirming the optimal O(N_dofs^(-1/2)) rate (Section 4.4's stretch
-verification target) needs many more iterations than is practical for a
-fast test here, and remains an open follow-up.
+Unlike ``test_residual_estimator_convergence.py``, which checks a tight
+uniform-refinement rate, this only checks the robust signal available from a
+few AMR iterations on small, pre-asymptotic meshes: the mesh grows every
+iteration and the final estimator is smaller than the first. The estimator is
+not required to decrease monotonically, because Dorfler marking on a very
+coarse mesh can increase it transiently. Confirming the optimal
+``O(N_dofs^(-1/2))`` rate needs more iterations than a fast test allows.
 """
 
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
@@ -54,10 +47,18 @@ def _solve_and_estimate(mesh):
     problem = create_poisson_l_shaped_singular_problem(mesh)
 
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
-    condensed = condense_dirichlet_system(matrix, vector, dirichlet_dofs, dirichlet_values)
+    condensed = condense_dirichlet_system(
+        matrix, vector, dirichlet_dofs, dirichlet_values
+    )
     free_dof_values = jnp.linalg.solve(condensed.matrix.todense(), condensed.vector)
     full_dof_values = expand_condensed_solution(free_dof_values, condensed)
     solution = FiniteElementFunction(space=space, dof_values=full_dof_values)

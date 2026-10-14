@@ -1,14 +1,9 @@
-"""Tests for CellBasis: affine geometry mapping, Jacobians, weights, values,
-gradients.
+"""Tests for CellBasis: affine geometry, Jacobians, weights, values, gradients.
 
-See Section 10.2 of the architecture specification; GEO-01 through GEO-04
-of the FEM testing plan.
-
-Quantities constant along the cell or quadrature axis are stored at their
-natural, un-repeated shape rather than broadcast out to the full
-``(K, Q, ...)`` shape (see ``CellBasis``'s own docstring): ``jacobians``,
-``inverse_jacobians``, ``jacobian_determinants``, and ``gradients`` collapse
-their ``Q`` axis to ``1``; ``values`` collapses its ``K`` axis to ``1``.
+Quantities constant along the cell or quadrature axis keep that axis with
+size one (see ``CellBasis``): ``jacobians``, ``inverse_jacobians``,
+``jacobian_determinants``, and P1 ``gradients`` collapse ``Q``; identity-mapped
+``values`` collapse ``K``.
 """
 
 import jax.numpy as jnp
@@ -22,7 +17,7 @@ from jax_fem.space import create_cell_basis, create_finite_element_space
 
 # A single skewed (non-axis-aligned) triangle, area = 0.5 * |cross((2,0),(0.5,3))| = 3.
 # Its Jacobian [[2, 0.5], [0, 3]] is non-diagonal (J != J^T), so it also
-# serves GEO-04's "hide a swapped transpose" requirement.
+# exposes a swapped transpose.
 _SKEWED_TRIANGLE_VERTICES = ((0.0, 0.0), (2.0, 0.0), (0.5, 3.0))
 _SKEWED_TRIANGLE_CELLS = ((0, 1, 2),)
 
@@ -54,7 +49,7 @@ def test_shapes() -> None:
 
 @pytest.mark.unit
 def test_physical_points_at_reference_vertices_recover_mesh_vertices() -> None:
-    """GEO-01: each reference vertex maps to the corresponding physical vertex.
+    """Each reference vertex maps to the corresponding physical vertex.
 
     Uses a non-axis-aligned triangle so a swapped Jacobian row/column
     cannot pass accidentally.
@@ -71,7 +66,7 @@ def test_physical_points_at_reference_vertices_recover_mesh_vertices() -> None:
     )
 
     basis = create_cell_basis(space, quadrature)
-    recovered = basis.physical_points[0, :, 0, :]  # (3, 2)
+    recovered = basis.physical_points[0, :, 0, :]
     expected = jnp.asarray(_SKEWED_TRIANGLE_VERTICES)
     assert jnp.allclose(recovered, expected, atol=1e-14, rtol=1e-12)
 
@@ -79,7 +74,7 @@ def test_physical_points_at_reference_vertices_recover_mesh_vertices() -> None:
 @pytest.mark.unit
 @pytest.mark.property
 def test_forward_inverse_map_round_trip() -> None:
-    """GEO-02: F_K^{-1}(F_K(xhat)) == xhat at vertices, edge points, and an
+    """F_K^{-1}(F_K(xhat)) == xhat at vertices, edge points, and an
     off-center interior point.
     """
     space = _make_space(_SKEWED_TRIANGLE_VERTICES, _SKEWED_TRIANGLE_CELLS)
@@ -111,8 +106,8 @@ def test_forward_inverse_map_round_trip() -> None:
     # mesh.vertex_coordinates[...] already carries the (1, 2) row-vector
     # axis; insert only the quadrature-broadcast axis alongside it.
     origin = space.mesh.vertex_coordinates[space.mesh.cells_to_vertices[:, 0]]
-    origin = origin[:, None, :, :]  # (K, 1, 1, 2)
-    displacement = basis.physical_points - origin  # (K, Q, 1, 2)
+    origin = origin[:, None, :, :]
+    displacement = basis.physical_points - origin
     # x_row = origin_row + xhat_row @ J^T  =>  xhat_row = (x - origin)_row @ (J^{-1})^T.
     recovered_reference_points = displacement @ basis.inverse_jacobians.mT
 
@@ -148,7 +143,7 @@ def test_jacobian_determinant_matches_twice_area_over_reference_measure() -> Non
 
 @pytest.mark.unit
 def test_clockwise_triangle_is_not_rejected_but_flips_sign() -> None:
-    """GEO-03: explicit orientation policy.
+    """Explicit orientation policy.
 
     Clockwise cells are not rejected (the documented "trust the caller"
     policy, ``create_triangle_mesh_from_arrays``): construction succeeds,
@@ -192,7 +187,7 @@ def test_inverse_jacobians_are_true_inverses() -> None:
 
 @pytest.mark.unit
 def test_physical_gradient_transformation_independent_solve() -> None:
-    """GEO-04: grad_x(phi_i) cross-checked by an independently solved linear system.
+    """Grad_x(phi_i) cross-checked by an independently solved linear system.
 
     ``grad_phys @ J = grad_ref`` (row-vector convention), solved here via
     ``jnp.linalg.solve`` -- a different code path from ``create_cell_basis``'s
@@ -206,12 +201,12 @@ def test_physical_gradient_transformation_independent_solve() -> None:
 
     reference_gradients = space.element.tabulate_basis_gradients(
         quadrature.points
-    )[0, 0]  # (3, 2), constant
-    jacobian = basis.jacobians[0, 0]  # (2, 2)
+    )[0, 0]  # constant
+    jacobian = basis.jacobians[0, 0]
 
     # grad_phys @ J = grad_ref  <=>  J^T @ grad_phys^T = grad_ref^T.
-    solved_transpose = jnp.linalg.solve(jacobian.mT, reference_gradients.mT)  # (2, 3)
-    expected_gradients = solved_transpose.mT  # (3, 2)
+    solved_transpose = jnp.linalg.solve(jacobian.mT, reference_gradients.mT)
+    expected_gradients = solved_transpose.mT
 
     assert jnp.allclose(basis.gradients[0, 0], expected_gradients, atol=1e-14)
 
@@ -228,15 +223,14 @@ def test_gradient_and_value_reconstruction_of_affine_function() -> None:
     def u(xy):
         return a * xy[..., 0] + b * xy[..., 1] + c
 
-    dof_values = u(space.dof_coordinates)  # (N_dofs, 1)
-    local_dof_values = dof_values[space.cells_to_dofs]  # (K, N_phi, 1)
-    local_dof_values_row = local_dof_values[:, None, :, :]  # (K, 1, N_phi, 1)
+    dof_values = u(space.dof_coordinates)
+    local_dof_values = dof_values[space.cells_to_dofs]
+    local_dof_values_row = local_dof_values[:, None, :, :]
 
-    # Exact formulas from Section 11.2.
-    values = basis.values.mT @ local_dof_values_row  # (K, Q, 1, 1)
-    gradients = local_dof_values_row.mT @ basis.gradients  # (K, 1, 1, d)
+    values = basis.values.mT @ local_dof_values_row
+    gradients = local_dof_values_row.mT @ basis.gradients
 
-    expected_values = u(basis.physical_points)  # (K, Q, 1)
+    expected_values = u(basis.physical_points)
     assert jnp.allclose(
         values[..., 0, 0], expected_values[..., 0], atol=1e-14, rtol=1e-12
     )
