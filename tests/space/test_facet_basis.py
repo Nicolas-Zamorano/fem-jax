@@ -1,7 +1,4 @@
-"""Tests for FacetBasis: interior-facet geometry and both-sided gradients.
-
-See Section 4.2 of the implementation plan (``.context/implementation_plan.md``).
-"""
+"""Tests for FacetBasis: interior-facet geometry and two-sided gradients."""
 
 import jax.numpy as jnp
 import pytest
@@ -85,7 +82,7 @@ def test_normal_is_unit_perpendicular_and_points_plus_to_minus(
     _, _, facet_basis = _facet_basis_for(mesh, LagrangeTriangleP1)
     assert facet_basis.interior_facets.shape[0] == 4  # 4 interior spoke edges
 
-    normals = facet_basis.normals[:, 0, 0, :]  # (F, 2)
+    normals = facet_basis.normals[:, 0, 0, :]
     assert jnp.allclose(jnp.linalg.norm(normals, axis=-1), 1.0, atol=1e-14)
 
     facet_vertices = mesh.facets_to_vertices[facet_basis.interior_facets]

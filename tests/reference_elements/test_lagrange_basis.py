@@ -1,17 +1,10 @@
-"""Tests for the scalar P1 and P2 Lagrange elements (Section 9.2 of the
-architecture specification; REF-01 through REF-07 of the FEM testing plan).
+"""Tests for the scalar P1 and P2 Lagrange elements.
 
-Reference points have shape ``(1, Q, 1, 2)``: the leading size-1 axis
-mirrors the cell axis of a ``CellBasis`` (Section 6.2). P1's basis gradients
-are constant, so its ``tabulate_basis_gradients`` returns a single
-``(1, 1, 3, 2)`` value regardless of ``Q``, rather than one per point; it
-broadcasts against ``Q``-sized quantities wherever it is used. P2's
-gradients vary with the quadrature point, so its ``tabulate_basis_gradients``
-returns the fuller ``(1, Q, 6, 2)``.
-
-REF-06/REF-07 (polynomial completeness for degree > 1, Section 3.5 of the
-implementation plan) are covered by ``test_p2_polynomial_completeness``
-below.
+Reference points have shape ``(1, Q, 1, 2)``: the leading size-one axis
+mirrors the cell axis of a ``CellBasis``. P1 gradients are constant, so
+``tabulate_basis_gradients`` returns ``(1, 1, 3, 2)`` regardless of ``Q``; P2
+gradients vary with the point and have shape ``(1, Q, 6, 2)``. Polynomial
+completeness of P2 is covered by ``test_p2_polynomial_completeness``.
 """
 
 import jax
@@ -39,11 +32,11 @@ def test_basis_gradients_shape(p1_element: LagrangeTriangleP1) -> None:
 
 @pytest.mark.unit
 def test_node_count_and_placement(p1_element: LagrangeTriangleP1) -> None:
-    """REF-01 (adapted): P1 has exactly 3 nodes, at the reference vertices.
+    """P1 has exactly 3 nodes, at the reference vertices.
 
     P1 has no separate "node coordinate" API distinct from the reference
-    cell's vertices (Section 9.2: local DOF i is owned by reference vertex
-    i), so this checks that directly rather than a dedicated nodes array.
+    cell's vertices (local DOF i is owned by reference vertex i), so this
+    checks that directly rather than a dedicated nodes array.
     """
     assert p1_element.number_of_local_dofs == 3
     nodes = p1_element.reference_cell.vertex_coordinates
@@ -56,18 +49,18 @@ def test_node_count_and_placement(p1_element: LagrangeTriangleP1) -> None:
 
 @pytest.mark.unit
 def test_nodal_property(p1_element: LagrangeTriangleP1) -> None:
-    """REF-02: phi_i(reference_vertex_j) == delta_ij, basis ordering consistent."""
+    """Phi_i(reference_vertex_j) == delta_ij, basis ordering consistent."""
     reference_vertices = p1_element.reference_cell.vertex_coordinates.reshape(
         1, 3, 1, 2
     )
-    values = p1_element.tabulate_basis_values(reference_vertices)  # (1, 3, 3, 1)
+    values = p1_element.tabulate_basis_values(reference_vertices)
     assert jnp.allclose(values[0, :, :, 0], jnp.eye(3), atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
 @pytest.mark.property
 def test_partition_of_unity(p1_element: LagrangeTriangleP1) -> None:
-    """REF-03: sum_i phi_i(x) == 1 at deterministic and random points."""
+    """Sum_i phi_i(x) == 1 at deterministic and random points."""
     deterministic_points = jnp.asarray(
         [[[[0.0, 0.0]], [[1.0, 0.0]], [[0.0, 1.0]], [[1.0 / 3, 1.0 / 3]]]]
     )
@@ -82,7 +75,7 @@ def test_partition_of_unity(p1_element: LagrangeTriangleP1) -> None:
 @pytest.mark.unit
 @pytest.mark.property
 def test_gradients_sum_to_zero(p1_element: LagrangeTriangleP1) -> None:
-    """REF-04: sum_i grad(phi_i) == 0."""
+    """Sum_i grad(phi_i) == 0."""
     points = jnp.zeros((1, 1, 1, 2))
     gradients = p1_element.tabulate_basis_gradients(points)
     assert jnp.allclose(jnp.sum(gradients, axis=2), 0.0, atol=1e-14)
@@ -90,7 +83,7 @@ def test_gradients_sum_to_zero(p1_element: LagrangeTriangleP1) -> None:
 
 @pytest.mark.unit
 def test_exact_p1_basis_values_and_gradients(p1_element: LagrangeTriangleP1) -> None:
-    """REF-05: reproduces phi=(1-xi-eta, xi, eta) and grad=(-1,-1),(1,0),(0,1).
+    """Reproduces phi=(1-xi-eta, xi, eta) and grad=(-1,-1),(1,0),(0,1).
 
     Expected arrays are computed directly from the input coordinates here,
     independently of the element's own implementation.
@@ -125,11 +118,11 @@ def test_gradients_match_autodiff_of_values(p1_element: LagrangeTriangleP1) -> N
 
     key = jax.random.PRNGKey(2)
     points = jax.random.uniform(key, (11, 2))
-    autodiff_gradients = jax.vmap(jax.jacobian(values_at_point))(points)  # (11, 3, 2)
+    autodiff_gradients = jax.vmap(jax.jacobian(values_at_point))(points)
 
     tabulated_gradients = p1_element.tabulate_basis_gradients(
         points.reshape(1, 11, 1, 2)
-    )  # (1, 1, 3, 2), constant: broadcasts against every one of the 11 points.
+    )  # constant: broadcasts against all 11 points
     assert jnp.allclose(
         autodiff_gradients, tabulated_gradients[0, 0], atol=1e-12, rtol=1e-10
     )
@@ -187,7 +180,7 @@ def test_p2_entity_dofs() -> None:
 
 @pytest.mark.unit
 def test_p2_node_count_and_placement(p2_element: LagrangeTriangleP2) -> None:
-    """REF-01 (adapted): P2 has 6 nodes -- the 3 vertices and 3 edge
+    """P2 has 6 nodes -- the 3 vertices and 3 edge
     midpoints -- all within the closed reference triangle."""
     assert p2_element.number_of_local_dofs == 6
     nodes = _P2_NODES[:, :, 0, :]
@@ -200,15 +193,15 @@ def test_p2_node_count_and_placement(p2_element: LagrangeTriangleP2) -> None:
 
 @pytest.mark.unit
 def test_p2_nodal_property(p2_element: LagrangeTriangleP2) -> None:
-    """REF-02: phi_i(node_j) == delta_ij at all 6 nodes."""
-    values = p2_element.tabulate_basis_values(_P2_NODES)  # (1, 6, 6, 1)
+    """Phi_i(node_j) == delta_ij at all 6 nodes."""
+    values = p2_element.tabulate_basis_values(_P2_NODES)
     assert jnp.allclose(values[0, :, :, 0], jnp.eye(6), atol=1e-14, rtol=1e-12)
 
 
 @pytest.mark.unit
 @pytest.mark.property
 def test_p2_partition_of_unity(p2_element: LagrangeTriangleP2) -> None:
-    """REF-03: sum_i phi_i(x) == 1 at deterministic and random points."""
+    """Sum_i phi_i(x) == 1 at deterministic and random points."""
     key = jax.random.PRNGKey(1)
     random_points = jax.random.uniform(key, (1, 20, 1, 2))
     points = jnp.concatenate([_P2_NODES, random_points], axis=1)
@@ -220,7 +213,7 @@ def test_p2_partition_of_unity(p2_element: LagrangeTriangleP2) -> None:
 @pytest.mark.unit
 @pytest.mark.property
 def test_p2_gradients_sum_to_zero(p2_element: LagrangeTriangleP2) -> None:
-    """REF-04: sum_i grad(phi_i) == 0, at every point (not just one, since
+    """Sum_i grad(phi_i) == 0, at every point (not just one, since
     P2's gradients are not constant)."""
     key = jax.random.PRNGKey(3)
     points = jax.random.uniform(key, (1, 15, 1, 2))
@@ -232,7 +225,7 @@ def test_p2_gradients_sum_to_zero(p2_element: LagrangeTriangleP2) -> None:
 def test_p2_exact_basis_values_and_gradients_at_a_point(
     p2_element: LagrangeTriangleP2,
 ) -> None:
-    """REF-05: reproduces phi_i and grad(phi_i) against independently
+    """Reproduces phi_i and grad(phi_i) against independently
     hand-computed formulas at a generic (non-nodal) point."""
     xi, eta = 0.2, 0.35
     point = jnp.asarray([[[[xi, eta]]]])
@@ -275,11 +268,11 @@ def test_p2_gradients_match_autodiff_of_values(p2_element: LagrangeTriangleP2) -
 
     key = jax.random.PRNGKey(4)
     points = jax.random.uniform(key, (11, 2))
-    autodiff_gradients = jax.vmap(jax.jacobian(values_at_point))(points)  # (11, 6, 2)
+    autodiff_gradients = jax.vmap(jax.jacobian(values_at_point))(points)
 
     tabulated_gradients = p2_element.tabulate_basis_gradients(
         points.reshape(1, 11, 1, 2)
-    )[0]  # (11, 6, 2)
+    )[0]
     assert jnp.allclose(
         autodiff_gradients, tabulated_gradients, atol=1e-12, rtol=1e-10
     )
@@ -288,7 +281,7 @@ def test_p2_gradients_match_autodiff_of_values(p2_element: LagrangeTriangleP2) -
 @pytest.mark.unit
 @pytest.mark.property
 def test_p2_polynomial_completeness(p2_element: LagrangeTriangleP2) -> None:
-    """REF-06/REF-07: P2 exactly reproduces every quadratic polynomial.
+    """P2 exactly reproduces every quadratic polynomial.
 
     Nodal-interpolates a full quadratic ``u = c0 + c1 x + c2 y + c3 x^2 +
     c4 x y + c5 y^2`` at the 6 reference nodes, then checks the resulting
@@ -301,11 +294,11 @@ def test_p2_polynomial_completeness(p2_element: LagrangeTriangleP2) -> None:
         x, y = xy[..., 0], xy[..., 1]
         return c0 + c1 * x + c2 * y + c3 * x**2 + c4 * x * y + c5 * y**2
 
-    nodal_values = u(_P2_NODES[:, :, 0, :])  # (1, 6)
+    nodal_values = u(_P2_NODES[:, :, 0, :])
 
     key = jax.random.PRNGKey(5)
     evaluation_points = jax.random.uniform(key, (1, 25, 1, 2))
-    basis_values = p2_element.tabulate_basis_values(evaluation_points)  # (1, 25, 6, 1)
+    basis_values = p2_element.tabulate_basis_values(evaluation_points)
     reconstructed = jnp.sum(basis_values[..., 0] * nodal_values[:, None, :], axis=-1)
 
     expected = u(evaluation_points[:, :, 0, :])
@@ -323,7 +316,7 @@ def test_p2_rejects_bad_shape(p2_element: LagrangeTriangleP2) -> None:
 # ---------------------------------------------------------------------------
 #
 # CellBasis always shares one reference point set across every cell (leading
-# axis 1), but FacetBasis (Section 4.2) evaluates a *distinct* reference
+# axis 1), but FacetBasis evaluates a *distinct* reference
 # point per facet within that facet's own cell -- a genuine batch axis B > 1
 # -- so tabulate_basis_values/tabulate_basis_gradients must work for any B,
 # not just B == 1.
@@ -331,7 +324,9 @@ def test_p2_rejects_bad_shape(p2_element: LagrangeTriangleP2) -> None:
 
 @pytest.mark.unit
 @pytest.mark.jax
-def test_p1_tabulate_accepts_arbitrary_batch_size(p1_element: LagrangeTriangleP1) -> None:
+def test_p1_tabulate_accepts_arbitrary_batch_size(
+    p1_element: LagrangeTriangleP1,
+) -> None:
     key = jax.random.PRNGKey(6)
     points = jax.random.uniform(key, (5, 3, 1, 2))  # B=5 distinct point sets
 
@@ -352,7 +347,9 @@ def test_p1_tabulate_accepts_arbitrary_batch_size(p1_element: LagrangeTriangleP1
 
 @pytest.mark.unit
 @pytest.mark.jax
-def test_p2_tabulate_accepts_arbitrary_batch_size(p2_element: LagrangeTriangleP2) -> None:
+def test_p2_tabulate_accepts_arbitrary_batch_size(
+    p2_element: LagrangeTriangleP2,
+) -> None:
     key = jax.random.PRNGKey(7)
     points = jax.random.uniform(key, (5, 3, 1, 2))
 

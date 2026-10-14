@@ -1,16 +1,13 @@
 """Uniform-refinement convergence study for the residual error estimator.
 
-See Section 4.4 of the implementation plan (``.context/implementation_plan.md``):
-on the L-shaped re-entrant-corner singular problem, the classical residual
-estimator should converge at the same sub-optimal rate ``O(h^(2/3))`` as the
-true H1 error (both limited by the domain's genuine 270-degree corner
-singularity, not by the discretization), with a bounded effectivity index
-``eta / |u - u_h|_H1``.
+On the L-shaped re-entrant-corner singular problem, the estimator should
+converge at the same reduced rate ``O(h^(2/3))`` as the true H1 error (both
+limited by the 270-degree corner singularity), with a bounded effectivity
+index ``eta / |u - u_h|_H1``.
 
-Uses ``create_gmsh_mesh_hierarchy`` for an exact 1-to-4 refinement sequence
-(Section 2.2), rather than independently-built meshes: the estimator's
-comparison across levels is only meaningful if ``h`` genuinely halves each
-step, which post-hoc-constructed meshes at a target size only approximate.
+Uses ``create_gmsh_mesh_hierarchy`` for an exact 1-to-4 refinement sequence,
+so ``h`` halves exactly at each level; independently built meshes at a target
+size only approximate that.
 """
 
 import math
@@ -18,18 +15,24 @@ import math
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
     expand_condensed_solution,
 )
-from jax_fem.diagnostics import compute_h1_seminorm_error, compute_residual_error_estimator
+from jax_fem.diagnostics import (
+    compute_h1_seminorm_error,
+    compute_residual_error_estimator,
+)
 from jax_fem.element import LagrangeTriangleP1
 from jax_fem.forms import elliptic_bilinear_form, elliptic_linear_form
 from jax_fem.function import FiniteElementFunction
 from jax_fem.mesh import create_gmsh_mesh_hierarchy, l_shaped_gmsh_geometry
-from jax_fem.problem import create_poisson_l_shaped_singular_problem, evaluate_elliptic_coefficients
+from jax_fem.problem import (
+    create_poisson_l_shaped_singular_problem,
+    evaluate_elliptic_coefficients,
+)
 from jax_fem.reference_cell import ReferenceInterval, ReferenceTriangle
 from jax_fem.space import create_cell_basis, create_finite_element_space
 from jax_fem.space.facet_basis import create_facet_basis
@@ -41,8 +44,8 @@ _TARGET_RATE = 2.0 / 3.0
 # converges to O(h^(2/3)) slowly (the measured rate is still visibly
 # pre-asymptotic -- ~0.56 -> ~0.64 -- across these 4 levels, monotonically
 # approaching 2/3 from below), so this checks the *trend*, not a tight
-# asymptotic match; a much finer mesh (or AMR, Section 4.2's stretch item)
-# would be needed to see the rate converge tighter than this.
+# asymptotic match; a much finer mesh (or AMR) would be needed
+# to see the rate converge tighter than this.
 _RATE_TOLERANCE = 0.3
 
 
@@ -58,8 +61,14 @@ def _estimate_at_each_level(levels: int, base_h: float):
         problem = create_poisson_l_shaped_singular_problem(mesh)
 
         coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-        matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-        vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+        local_matrices = integrate_cellwise(
+            elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+        )
+        matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+        local_vectors = integrate_cellwise(
+            elliptic_linear_form(basis, coefficients), basis.physical_weights
+        )
+        vector = assemble_vector(local_vectors, basis.space)
         dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
         condensed = condense_dirichlet_system(
             matrix, vector, dirichlet_dofs, dirichlet_values

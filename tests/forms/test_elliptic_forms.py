@@ -1,15 +1,13 @@
 """Tests for elliptic coefficient evaluation and the standard forms.
 
-See Sections 12 and 13 of the architecture specification; ELL-01, ELL-02,
-and ELL-03 of the FEM testing plan. ELL-04 (variable-coefficient
-manufactured problem) is covered end to end in
-``convergence/test_manufactured_problems.py`` (``SimpleEllipticProblem``).
+The variable-coefficient manufactured problem is covered end to end in
+``convergence/test_manufactured_problems.py``.
 """
 
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
@@ -47,7 +45,7 @@ def _make_basis(exactness_degree: int = 2):
 
 
 def _integrate(form, basis, coefficients):
-    pointwise = form(basis, coefficients)
+    pointwise = form(basis, basis, coefficients)
     return jnp.sum(basis.physical_weights * pointwise, axis=1)
 
 
@@ -94,7 +92,7 @@ def test_evaluate_elliptic_coefficients_rejects_bad_shape() -> None:
 
 @pytest.mark.unit
 def test_advection_term_matches_hand_derivation() -> None:
-    """ELL-03: assembly and sign convention of int v beta . grad u."""
+    """Assembly and sign convention of int v beta . grad u."""
     basis = _make_basis()
     beta = (2.0, -1.0)
     problem = EllipticProblem(
@@ -117,7 +115,7 @@ def test_advection_term_matches_hand_derivation() -> None:
 
 @pytest.mark.unit
 def test_reaction_global_matrix_equals_c_times_mass_matrix() -> None:
-    """ELL-02: the reaction matrix is exactly c times the mass matrix."""
+    """The reaction matrix is exactly c times the mass matrix."""
     basis = _make_basis()
     c = 2.5
     problem = EllipticProblem(
@@ -142,7 +140,7 @@ def test_reaction_global_matrix_equals_c_times_mass_matrix() -> None:
 def test_diffusion_reaction_constrained_system_is_positive_definite(
     four_triangle_center_vertex_mesh, p1_element
 ) -> None:
-    """ELL-02: the constrained diffusion+reaction system is positive definite."""
+    """The constrained diffusion+reaction system is positive definite."""
     mesh = four_triangle_center_vertex_mesh
     space = create_finite_element_space(mesh, p1_element)
     quadrature = space.element.reference_cell.create_quadrature(2)
@@ -160,8 +158,14 @@ def test_diffusion_reaction_constrained_system_is_positive_definite(
         ),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values
@@ -177,11 +181,11 @@ def test_diffusion_reaction_constrained_system_is_positive_definite(
 def test_anisotropic_diffusion_affine_patch_test(
     four_triangle_center_vertex_mesh, p1_element
 ) -> None:
-    """ELL-01: off-diagonal diffusion tensor contraction, via an affine patch test.
+    """Off-diagonal diffusion tensor contraction, via an affine patch test.
 
     ``grad(v)^T A grad(u)`` must be contracted as a genuine bilinear form,
     not ``A_scalar * (grad v . grad u)`` (only valid for scalar isotropic
-    diffusion, Section 13 of the testing plan): an off-diagonal ``A`` entry
+    diffusion): an off-diagonal ``A`` entry
     catches a swapped-index or accidental-scalar-shortcut bug. ``f`` is
     computed analytically: ``div(A grad u) == 0`` for constant ``A`` and
     affine ``u``.
@@ -207,8 +211,14 @@ def test_anisotropic_diffusion_affine_patch_test(
         ),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     assert jnp.allclose(matrix.todense(), matrix.todense().T, atol=1e-14, rtol=1e-12)
 
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)

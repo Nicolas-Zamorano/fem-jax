@@ -1,10 +1,4 @@
-"""Tests for FiniteElementSpace and generic (P1 and P2) global DOF numbering.
-
-See Section 10.1 of the architecture specification; DOF-01 through DOF-05 of
-the FEM testing plan, and Section 3.2/3.3 of the implementation plan
-(``.context/implementation_plan.md``) for the generic entity_dofs-driven
-numbering exercised throughout.
-"""
+"""Tests for FiniteElementSpace and its generic ``entity_dofs``-driven DOF numbering."""
 
 import dataclasses
 
@@ -44,7 +38,7 @@ def test_shapes(two_triangle_unit_square_mesh, p1_element) -> None:
 def test_global_dof_count_matches_vertex_count(
     four_triangle_center_vertex_mesh, p1_element
 ) -> None:
-    """DOF-01: for P1, N_dofs == N_vertices (the general formula's p=1 case)."""
+    """For P1, N_dofs == N_vertices (the general formula's p=1 case)."""
     space = create_finite_element_space(four_triangle_center_vertex_mesh, p1_element)
     assert (
         space.number_of_dofs
@@ -58,7 +52,7 @@ def test_malformed_element_missing_entity_dofs_raises(
     two_triangle_unit_square_mesh,
 ) -> None:
     """create_finite_element_space is generic over any entity_dofs-driven
-    element (Section 3.2): it no longer isinstance-gates on a specific
+    element: it no longer isinstance-gates on a specific
     concrete class, but still rejects an element that fails to implement
     the FiniteElement protocol at all (here, missing entity_dofs/is_nodal).
     """
@@ -130,7 +124,7 @@ def _shared_facet_and_cells(mesh):
 def test_shared_edge_dofs_match_across_reversed_orientation(
     reversed_orientation_two_triangle_mesh, p1_element
 ) -> None:
-    """DOF-02: shared-edge global DOFs agree, reversed to match opposite orientation.
+    """Shared-edge global DOFs agree, reversed to match opposite orientation.
 
     ``K_0 = (v0, v1, v2)``, ``K_1 = (v3, v2, v1)``: the shared edge is
     traversed in opposite directions locally (fixture docstring), so the
@@ -164,7 +158,7 @@ def test_shared_edge_dofs_match_across_reversed_orientation(
 def test_finite_element_function_is_continuous_across_shared_edge(
     reversed_orientation_two_triangle_mesh, p1_element
 ) -> None:
-    """DOF-04: a discrete function's trace is single-valued across an interior edge.
+    """A discrete function's trace is single-valued across an interior edge.
 
     Tests conformity end to end: local-to-global numbering, edge
     orientation, local coefficient extraction, the inverse geometry map,
@@ -183,7 +177,7 @@ def test_finite_element_function_is_continuous_across_shared_edge(
         0.13 * global_dof_indices**2
         - 0.71 * global_dof_indices
         + jnp.sin(global_dof_indices + 0.2)
-    )[:, None]  # (N_dofs, 1); deliberately nonsymmetric in the DOF index.
+    )[:, None]  # deliberately nonsymmetric in the DOF index
     function = FiniteElementFunction(space=space, dof_values=global_values)
 
     shared_facet, cell_0, cell_1 = _shared_facet_and_cells(mesh)
@@ -194,7 +188,7 @@ def test_finite_element_function_is_continuous_across_shared_edge(
     vertex_b = mesh.vertex_coordinates[edge_vertices[1], 0]
 
     parameters = jnp.array([0.07, 0.23, 0.41, 0.68, 0.91])[:, None]
-    physical_points = (1.0 - parameters) * vertex_a + parameters * vertex_b  # (5, 2)
+    physical_points = (1.0 - parameters) * vertex_a + parameters * vertex_b
 
     def reference_points_for_cell(cell_index: int) -> jnp.ndarray:
         origin = mesh.vertex_coordinates[mesh.cells_to_vertices[cell_index, 0], 0]
@@ -204,10 +198,10 @@ def test_finite_element_function_is_continuous_across_shared_edge(
         edge_2 = (
             mesh.vertex_coordinates[mesh.cells_to_vertices[cell_index, 2], 0] - origin
         )
-        jacobian = jnp.stack((edge_1, edge_2), axis=-1)  # (2, 2)
-        displacement = physical_points - origin  # (5, 2)
-        reference_points = displacement @ jnp.linalg.inv(jacobian).mT  # (5, 2)
-        return reference_points.reshape(1, -1, 1, 2)  # (1, 5, 1, 2)
+        jacobian = jnp.stack((edge_1, edge_2), axis=-1)
+        displacement = physical_points - origin
+        reference_points = displacement @ jnp.linalg.inv(jacobian).mT
+        return reference_points.reshape(1, -1, 1, 2)
 
     reference_points_0 = reference_points_for_cell(cell_0)
     reference_points_1 = reference_points_for_cell(cell_1)
@@ -215,10 +209,10 @@ def test_finite_element_function_is_continuous_across_shared_edge(
     basis_values_0 = space.element.tabulate_basis_values(reference_points_0)
     basis_values_1 = space.element.tabulate_basis_values(reference_points_1)
 
-    local_values_0 = function.dof_values[space.cells_to_dofs[cell_0]]  # (3, 1)
+    local_values_0 = function.dof_values[space.cells_to_dofs[cell_0]]
     local_values_1 = function.dof_values[space.cells_to_dofs[cell_1]]
 
-    trace_0 = basis_values_0.mT @ local_values_0  # (1, 5, 1, 1)
+    trace_0 = basis_values_0.mT @ local_values_0
     trace_1 = basis_values_1.mT @ local_values_1
 
     assert jnp.allclose(trace_0, trace_1, atol=1e-14)
@@ -231,7 +225,7 @@ def test_finite_element_function_is_continuous_across_shared_edge(
 
 @pytest.mark.unit
 def test_p2_global_dof_count(four_triangle_center_vertex_mesh, p2_element) -> None:
-    """DOF-01 for P2: N_dofs == N_vertices + N_facets."""
+    """N_dofs == N_vertices + N_facets."""
     mesh = four_triangle_center_vertex_mesh
     space = create_finite_element_space(mesh, p2_element)
     number_of_vertices = mesh.vertex_coordinates.shape[0]
@@ -262,10 +256,10 @@ def test_p2_dof_coordinates_are_vertices_then_facet_midpoints(
 def test_p2_shared_edge_dof_is_orientation_invariant(
     reversed_orientation_two_triangle_mesh, p2_element
 ) -> None:
-    """DOF-03 for P2: an edge-midpoint DOF is orientation-invariant by
-    construction (Section 3.3's note), so the shared edge's midpoint DOF is
+    """An edge-midpoint DOF is orientation-invariant by
+    construction, so the shared edge's midpoint DOF is
     the *same single global index* in both cells -- stronger than P1's
-    DOF-02 "reversed but same set" (P1 has 2 DOFs per edge, its endpoints,
+    "reversed but same set" (P1 has 2 DOFs per edge, its endpoints,
     which do reverse; P2's single midpoint DOF has no direction to
     reverse).
     """
@@ -291,7 +285,7 @@ def test_p2_shared_edge_dof_is_orientation_invariant(
 def test_p2_find_boundary_dofs_excludes_interior_edge_midpoints(
     four_triangle_center_vertex_mesh, p2_element
 ) -> None:
-    """DOF-05 for P2: interior-facet DOFs are excluded from boundary DOFs,
+    """Interior-facet DOFs are excluded from boundary DOFs,
     just as interior-vertex DOFs are.
     """
     mesh = four_triangle_center_vertex_mesh
@@ -304,7 +298,8 @@ def test_p2_find_boundary_dofs_excludes_interior_edge_midpoints(
     interior_facet_dofs = (interior_facets + space.entity_dof_offset[1]).tolist()
 
     assert boundary_dofs.isdisjoint(interior_facet_dofs)
-    assert set(interior_facet_dofs).issubset(set(range(space.number_of_dofs)) - boundary_dofs)
+    all_dofs = set(range(space.number_of_dofs))
+    assert set(interior_facet_dofs).issubset(all_dofs - boundary_dofs)
 
 
 @pytest.mark.unit
@@ -312,7 +307,7 @@ def test_p2_find_boundary_dofs_excludes_interior_edge_midpoints(
 def test_p2_finite_element_function_is_continuous_across_shared_edge(
     reversed_orientation_two_triangle_mesh, p2_element
 ) -> None:
-    """DOF-04 for P2: a discrete function's trace is single-valued across an
+    """A discrete function's trace is single-valued across an
     interior edge, sampled at several non-nodal points -- a stronger check
     than for P1, since a P2 edge trace is a genuine quadratic curve (3 DOFs
     per edge: 2 endpoints + midpoint), not merely affine.
@@ -334,7 +329,7 @@ def test_p2_finite_element_function_is_continuous_across_shared_edge(
     vertex_b = mesh.vertex_coordinates[edge_vertices[1], 0]
 
     parameters = jnp.array([0.07, 0.23, 0.41, 0.68, 0.91])[:, None]
-    physical_points = (1.0 - parameters) * vertex_a + parameters * vertex_b  # (5, 2)
+    physical_points = (1.0 - parameters) * vertex_a + parameters * vertex_b
 
     def reference_points_for_cell(cell_index: int) -> jnp.ndarray:
         origin = mesh.vertex_coordinates[mesh.cells_to_vertices[cell_index, 0], 0]
@@ -344,10 +339,10 @@ def test_p2_finite_element_function_is_continuous_across_shared_edge(
         edge_2 = (
             mesh.vertex_coordinates[mesh.cells_to_vertices[cell_index, 2], 0] - origin
         )
-        jacobian = jnp.stack((edge_1, edge_2), axis=-1)  # (2, 2)
-        displacement = physical_points - origin  # (5, 2)
-        reference_points = displacement @ jnp.linalg.inv(jacobian).mT  # (5, 2)
-        return reference_points.reshape(1, -1, 1, 2)  # (1, 5, 1, 2)
+        jacobian = jnp.stack((edge_1, edge_2), axis=-1)
+        displacement = physical_points - origin
+        reference_points = displacement @ jnp.linalg.inv(jacobian).mT
+        return reference_points.reshape(1, -1, 1, 2)
 
     reference_points_0 = reference_points_for_cell(cell_0)
     reference_points_1 = reference_points_for_cell(cell_1)
@@ -355,23 +350,23 @@ def test_p2_finite_element_function_is_continuous_across_shared_edge(
     basis_values_0 = space.element.tabulate_basis_values(reference_points_0)
     basis_values_1 = space.element.tabulate_basis_values(reference_points_1)
 
-    local_values_0 = function.dof_values[space.cells_to_dofs[cell_0]]  # (6, 1)
+    local_values_0 = function.dof_values[space.cells_to_dofs[cell_0]]
     local_values_1 = function.dof_values[space.cells_to_dofs[cell_1]]
 
-    trace_0 = basis_values_0.mT @ local_values_0  # (1, 5, 1, 1)
+    trace_0 = basis_values_0.mT @ local_values_0
     trace_1 = basis_values_1.mT @ local_values_1
 
     assert jnp.allclose(trace_0, trace_1, atol=1e-13)
 
 
 # ---------------------------------------------------------------------------
-# RT0: facet-owned, orientation-dependent DOF numbering (Section 5.2)
+# RT0: facet-owned, orientation-dependent DOF numbering
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 def test_rt0_global_dof_count_and_offset(four_triangle_center_vertex_mesh) -> None:
-    """DOF-01 for RT0: N_dofs == N_facets (edge-owned only, no vertex/cell DOFs)."""
+    """N_dofs == N_facets (edge-owned only, no vertex/cell DOFs)."""
     mesh = four_triangle_center_vertex_mesh
     element = RaviartThomasTriangleRT0(reference_cell=ReferenceTriangle())
     space = create_finite_element_space(mesh, element)
@@ -421,7 +416,7 @@ def test_rt0_local_dof_signs_for_a_single_canonically_ordered_cell() -> None:
 def test_rt0_shared_facet_gets_opposite_signs_under_reversed_orientation(
     reversed_orientation_two_triangle_mesh,
 ) -> None:
-    """DOF-03-style, for RT0: the two cells sharing an edge traversed in
+    """The two cells sharing an edge traversed in
     opposite local directions (fixture docstring) must disagree in sign on
     that shared facet -- otherwise the Piola-mapped physical flux would be
     discontinuous where it must be continuous (verified end to end in

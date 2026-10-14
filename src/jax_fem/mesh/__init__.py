@@ -1,4 +1,4 @@
-"""Mesh geometry, topology, and tags (Section 7)."""
+"""Mesh geometry, topology, tags, and adaptive refinement."""
 
 from jax_fem.mesh.amr import (
     adapt_mesh_from_error_estimator,
@@ -7,6 +7,13 @@ from jax_fem.mesh.amr import (
     refine_mesh_longest_edge_bisection,
 )
 from jax_fem.mesh.base import Mesh
+from jax_fem.mesh.dfn import (
+    DfnMesh,
+    create_dfn_mesh_from_arrays,
+    create_dfn_two_fractures_mesh,
+    create_fracture_frames,
+    read_dfn_mesh_avs,
+)
 from jax_fem.mesh.gmsh import (
     create_gmsh_l_shaped_mesh,
     create_gmsh_mesh_hierarchy,
@@ -38,6 +45,11 @@ __all__ = [
     "run_in_owned_gmsh_session",
     "create_triangle_mesh_from_gmsh_model",
     "read_triangle_mesh_from_msh",
+    "DfnMesh",
+    "create_dfn_mesh_from_arrays",
+    "read_dfn_mesh_avs",
+    "create_dfn_two_fractures_mesh",
+    "create_fracture_frames",
     "mark_cells_by_dorfler_bulk_criterion",
     "compute_target_cell_sizes",
     "refine_mesh_longest_edge_bisection",

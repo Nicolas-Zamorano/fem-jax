@@ -1,21 +1,30 @@
-"""Tests for the classical residual-based a posteriori error estimator.
-
-See Section 4 of the implementation plan (``.context/implementation_plan.md``).
-"""
+"""Tests for the residual-based a posteriori error estimator."""
 
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import (
+    assemble_matrix,
+    assemble_vector,
+    gather_vector,
+    integrate_cellwise,
+)
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
     expand_condensed_solution,
 )
-from jax_fem.diagnostics import compute_h1_seminorm_error, compute_residual_error_estimator
+from jax_fem.diagnostics import (
+    compute_facet_jump_indicators,
+    compute_h1_seminorm_error,
+    compute_residual_error_estimator,
+    evaluate_facet_fluxes,
+    evaluate_flux_divergence,
+)
 from jax_fem.element import LagrangeTriangleP1, LagrangeTriangleP2
 from jax_fem.forms import elliptic_bilinear_form, elliptic_linear_form
-from jax_fem.function import FiniteElementFunction
+from jax_fem.function import FiniteElementFunction, interpolate_function
 from jax_fem.mesh import create_gmsh_unit_square_mesh, create_triangle_mesh_from_arrays
 from jax_fem.problem import (
     EllipticProblem,
@@ -25,13 +34,11 @@ from jax_fem.problem import (
     create_full_boundary_dirichlet_condition,
     create_poisson_sin_sin_problem,
     evaluate_elliptic_coefficients,
+    isotropic_tensor_coefficient,
 )
 from jax_fem.reference_cell import ReferenceInterval, ReferenceTriangle
 from jax_fem.space import create_cell_basis, create_finite_element_space
 from jax_fem.space.facet_basis import create_facet_basis
-
-_UNIT_SQUARE_VERTICES = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
-_UNIT_SQUARE_CELLS = ((0, 1, 2), (0, 2, 3))
 
 _ZERO_PROBLEM_KWARGS = dict(
     diffusion=constant_tensor_coefficient(jnp.eye(2)),
@@ -39,14 +46,6 @@ _ZERO_PROBLEM_KWARGS = dict(
     reaction=constant_scalar_coefficient(0.0),
     source=constant_scalar_coefficient(0.0),
 )
-
-
-def _estimate(solution, space, problem, cell_degree: int = 4, facet_degree: int = 4):
-    quadrature = space.element.reference_cell.create_quadrature(cell_degree)
-    basis = create_cell_basis(space, quadrature)
-    facet_quadrature = ReferenceInterval().create_quadrature(facet_degree)
-    facet_basis = create_facet_basis(basis, facet_quadrature)
-    return compute_residual_error_estimator(solution, basis, facet_basis, problem), basis
 
 
 @pytest.mark.unit
@@ -74,8 +73,14 @@ def test_estimator_vanishes_for_exact_affine_p1_solution(
     quadrature = space.element.reference_cell.create_quadrature(3)
     basis = create_cell_basis(space, quadrature)
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values
@@ -93,28 +98,150 @@ def test_estimator_vanishes_for_exact_affine_p1_solution(
     assert abs(float(global_estimator)) < 1e-10
 
 
+def _structured_unit_square(cells_per_side: int = 4):
+    ticks = np.linspace(0.0, 1.0, cells_per_side + 1)
+    vertices = np.array([(x, y) for y in ticks for x in ticks])
+    cells = []
+    for j in range(cells_per_side):
+        for i in range(cells_per_side):
+            a = j * (cells_per_side + 1) + i
+            diagonal = a + cells_per_side + 2
+            cells += [(a, a + 1, diagonal), (a, diagonal, diagonal - 1)]
+    return create_triangle_mesh_from_arrays(vertices, np.array(cells))
+
+
+def _solve(space, problem, exactness_degree: int):
+    quadrature = space.element.reference_cell.create_quadrature(exactness_degree)
+    basis = create_cell_basis(space, quadrature)
+    coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
+    condensed = condense_dirichlet_system(
+        assemble_matrix(local_matrices, space, space),
+        assemble_vector(local_vectors, space),
+        dirichlet_dofs,
+        dirichlet_values,
+    )
+    free = jnp.linalg.solve(condensed.matrix.todense(), condensed.vector)
+    full = expand_condensed_solution(free, condensed)
+    return FiniteElementFunction(space=space, dof_values=full), basis
+
+
+def _quadratic(points):
+    x, y = points[..., [0]], points[..., [1]]
+    return x**2 + 3.0 * x * y - 2.0 * y**2
+
+
+def _quadratic_gradient(points):
+    x, y = points[..., [0]], points[..., [1]]
+    return jnp.concatenate((2.0 * x + 3.0 * y, 3.0 * x - 4.0 * y), axis=-1)
+
+
 @pytest.mark.unit
-def test_estimator_rejects_p2() -> None:
-    """The interior-residual term assumes div(A grad(u_h)) == 0 (exact only
-    for a constant-reference-gradient element); P2's gradients vary, so it
-    must raise rather than silently compute a wrong residual term.
-    """
-    mesh = create_triangle_mesh_from_arrays(_UNIT_SQUARE_VERTICES, _UNIT_SQUARE_CELLS)
-    element = LagrangeTriangleP2(reference_cell=ReferenceTriangle())
-    space = create_finite_element_space(mesh, element)
+@pytest.mark.integration
+def test_estimator_vanishes_for_exact_quadratic_p2_solution() -> None:
+    """P2 reproduces a quadratic solution exactly, so R_K = f + Lap(u_h) and
+    every flux jump vanish."""
+    mesh = _structured_unit_square(3)
+    space = create_finite_element_space(
+        mesh, LagrangeTriangleP2(reference_cell=ReferenceTriangle())
+    )
     problem = EllipticProblem(
-        **_ZERO_PROBLEM_KWARGS,
-        dirichlet_conditions=(),
+        diffusion=constant_tensor_coefficient(jnp.eye(2)),
+        advection=constant_vector_coefficient(jnp.zeros(2)),
+        reaction=constant_scalar_coefficient(0.0),
+        source=constant_scalar_coefficient(2.0),
+        dirichlet_conditions=(
+            create_full_boundary_dirichlet_condition(mesh, _quadratic),
+        ),
     )
-    solution = FiniteElementFunction(
-        space=space, dof_values=jnp.zeros((space.number_of_dofs, 1))
+    solution, basis = _solve(space, problem, exactness_degree=4)
+    facet_basis = create_facet_basis(basis, ReferenceInterval().create_quadrature(4))
+
+    cell_indicators, global_estimator = compute_residual_error_estimator(
+        solution, basis, facet_basis, problem
     )
-    with pytest.raises(NotImplementedError, match="LagrangeTriangleP1"):
-        _estimate(solution, space, problem)
+    assert cell_indicators.shape == (mesh.cells_to_vertices.shape[0], 1, 1, 1)
+    assert float(global_estimator) < 1e-10
 
 
 @pytest.mark.unit
-def test_cell_indicators_sum_to_global_squared(four_triangle_center_vertex_mesh) -> None:
+@pytest.mark.parametrize("element_type", [LagrangeTriangleP1, LagrangeTriangleP2])
+def test_flux_divergence_is_exact_for_linear_diffusion(element_type) -> None:
+    """For A = a I with linear a, A grad u_h lies in the element space on each
+    cell, so div(A grad u_h) = grad a . grad u_h + a Lap(u_h) is reproduced."""
+    mesh = _structured_unit_square(4)
+    space = create_finite_element_space(
+        mesh, element_type(reference_cell=ReferenceTriangle())
+    )
+    quadrature = space.element.reference_cell.create_quadrature(4)
+    basis = create_cell_basis(space, quadrature)
+
+    def scalar_diffusion(points):
+        return 1.0 + points[..., [0]] + 2.0 * points[..., [1]]
+
+    solution = interpolate_function(_quadratic, space)
+    flux_divergence = evaluate_flux_divergence(
+        solution, basis, isotropic_tensor_coefficient(scalar_diffusion)
+    )
+
+    points = basis.physical_points
+    if element_type is LagrangeTriangleP1:
+        gradients = gather_vector(solution.dof_values, space).mT @ basis.gradients
+        laplacian = 0.0
+    else:
+        gradients = _quadratic_gradient(points)
+        laplacian = 2.0 - 4.0
+    expected = (
+        jnp.sum(jnp.array([1.0, 2.0]) * gradients, axis=-1, keepdims=True)
+        + scalar_diffusion(points) * laplacian
+    )
+    assert jnp.allclose(
+        jnp.broadcast_to(flux_divergence, expected.shape), expected, atol=1e-11
+    )
+
+
+@pytest.mark.unit
+def test_flux_divergence_vanishes_for_p1_with_constant_diffusion() -> None:
+    mesh = _structured_unit_square(3)
+    space = create_finite_element_space(
+        mesh, LagrangeTriangleP1(reference_cell=ReferenceTriangle())
+    )
+    quadrature = space.element.reference_cell.create_quadrature(2)
+    basis = create_cell_basis(space, quadrature)
+    solution = interpolate_function(_quadratic, space)
+    diffusion = constant_tensor_coefficient(jnp.array([[2.0, 0.3], [0.3, 1.0]]))
+    flux_divergence = evaluate_flux_divergence(solution, basis, diffusion)
+    assert jnp.max(jnp.abs(flux_divergence)) < 1e-12
+
+
+@pytest.mark.unit
+def test_facet_jump_indicators_vanish_for_equal_fluxes() -> None:
+    mesh = _structured_unit_square(3)
+    space = create_finite_element_space(
+        mesh, LagrangeTriangleP1(reference_cell=ReferenceTriangle())
+    )
+    quadrature = space.element.reference_cell.create_quadrature(2)
+    basis = create_cell_basis(space, quadrature)
+    facet_basis = create_facet_basis(basis, ReferenceInterval().create_quadrature(2))
+    solution = interpolate_function(_quadratic, space)
+    diffusion = constant_tensor_coefficient(jnp.eye(2))
+    flux_plus, _ = evaluate_facet_fluxes(solution, facet_basis, diffusion)
+
+    indicators = compute_facet_jump_indicators(facet_basis, flux_plus, flux_plus)
+    assert indicators.shape == (mesh.cells_to_vertices.shape[0], 1, 1, 1)
+    assert jnp.all(indicators == 0.0)
+
+
+@pytest.mark.unit
+def test_cell_indicators_sum_to_global_squared(
+    four_triangle_center_vertex_mesh,
+) -> None:
     """eta == sqrt(sum_K eta_K^2), a basic reduce-consistency check, on a
     solution that is *not* exact (so eta_K is genuinely nonzero)."""
     mesh = four_triangle_center_vertex_mesh
@@ -125,8 +252,14 @@ def test_cell_indicators_sum_to_global_squared(four_triangle_center_vertex_mesh)
     quadrature = space.element.reference_cell.create_quadrature(4)
     basis = create_cell_basis(space, quadrature)
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values
@@ -161,8 +294,14 @@ def test_estimator_bounded_effectivity_for_smooth_problem() -> None:
     quadrature = space.element.reference_cell.create_quadrature(4)
     basis = create_cell_basis(space, quadrature)
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values
@@ -182,7 +321,9 @@ def test_estimator_bounded_effectivity_for_smooth_problem() -> None:
 
 
 @pytest.mark.unit
-def test_jump_accumulator_matches_hand_derivation(two_triangle_unit_square_mesh) -> None:
+def test_jump_accumulator_matches_hand_derivation(
+    two_triangle_unit_square_mesh,
+) -> None:
     """Exact hand-derived check of the segment_sum accumulator, using
     non-nodal-affine dof values chosen so grad(u_h) genuinely differs
     between the two cells while u_h itself stays continuous (i.e. a valid,
@@ -223,5 +364,8 @@ def test_jump_accumulator_matches_hand_derivation(two_triangle_unit_square_mesh)
     cell_indicators, global_estimator = compute_residual_error_estimator(
         solution, basis, facet_basis, problem
     )
-    assert jnp.allclose(cell_indicators, jnp.sqrt(jnp.array([50.0, 50.0])), rtol=1e-10)
+    assert cell_indicators.shape == (2, 1, 1, 1)
+    assert jnp.allclose(
+        jnp.ravel(cell_indicators), jnp.sqrt(jnp.array([50.0, 50.0])), rtol=1e-10
+    )
     assert float(global_estimator) == pytest.approx(10.0, rel=1e-10)

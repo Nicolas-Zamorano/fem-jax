@@ -1,9 +1,4 @@
-"""Tests for local (single-cell) form integration.
-
-See Sections 13 and 14.1 of the architecture specification; LOC-01 through
-LOC-06 of the FEM testing plan. LOC-07 (higher-order reference matrices) is
-a future-extension test, absent until a P2+ element exists.
-"""
+"""Tests for single-cell integration of the elliptic forms."""
 
 import jax.numpy as jnp
 import pytest
@@ -50,13 +45,13 @@ def _local_bilinear_matrix(basis, diffusion, advection, reaction) -> jnp.ndarray
         dirichlet_conditions=(),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    pointwise = elliptic_bilinear_form(basis, coefficients)
-    return jnp.sum(basis.physical_weights * pointwise, axis=1)[0]  # (N_phi, N_phi)
+    pointwise = elliptic_bilinear_form(basis, basis, coefficients)
+    return jnp.sum(basis.physical_weights * pointwise, axis=1)[0]
 
 
 @pytest.mark.unit
 def test_exact_p1_reference_stiffness_matrix() -> None:
-    """LOC-01: local Poisson stiffness on K_hat, A = I, against a hard-coded matrix."""
+    """Local Poisson stiffness on K_hat, A = I, against a hard-coded matrix."""
     basis = _make_basis()
     stiffness = _local_bilinear_matrix(
         basis, diffusion=_IDENTITY, advection=_ZERO_VECTOR, reaction=0.0
@@ -73,7 +68,7 @@ def test_exact_p1_reference_stiffness_matrix() -> None:
 
 @pytest.mark.unit
 def test_exact_p1_reference_mass_matrix() -> None:
-    """LOC-02: local mass matrix on K_hat against a hard-coded matrix."""
+    """Local mass matrix on K_hat against a hard-coded matrix."""
     basis = _make_basis()
     mass = _local_bilinear_matrix(
         basis, diffusion=_ZERO_TENSOR, advection=_ZERO_VECTOR, reaction=1.0
@@ -90,7 +85,7 @@ def test_exact_p1_reference_mass_matrix() -> None:
 
 @pytest.mark.unit
 def test_exact_p1_constant_load_vector() -> None:
-    """LOC-03: local load vector on K_hat, f = 1, against a hard-coded vector."""
+    """Local load vector on K_hat, f = 1, against a hard-coded vector."""
     basis = _make_basis()
     problem = EllipticProblem(
         diffusion=constant_tensor_coefficient(_ZERO_TENSOR),
@@ -101,7 +96,7 @@ def test_exact_p1_constant_load_vector() -> None:
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
     pointwise = elliptic_linear_form(basis, coefficients)
-    load_vector = jnp.sum(basis.physical_weights * pointwise, axis=1)[0]  # (3, 1)
+    load_vector = jnp.sum(basis.physical_weights * pointwise, axis=1)[0]
 
     assert load_vector.shape == (3, 1)
     expected = (1.0 / 6.0) * jnp.ones((3, 1))
@@ -111,7 +106,7 @@ def test_exact_p1_constant_load_vector() -> None:
 @pytest.mark.unit
 @pytest.mark.property
 def test_local_diffusion_matrix_properties(affine_triangle_vertices) -> None:
-    """LOC-04: symmetric, positive semidefinite, K @ 1 == 0 (constant nullspace)."""
+    """Symmetric, positive semidefinite, K @ 1 == 0 (constant nullspace)."""
     basis = _make_basis(affine_triangle_vertices)
     stiffness = _local_bilinear_matrix(
         basis, diffusion=_IDENTITY, advection=_ZERO_VECTOR, reaction=0.0
@@ -126,7 +121,7 @@ def test_local_diffusion_matrix_properties(affine_triangle_vertices) -> None:
 @pytest.mark.unit
 @pytest.mark.property
 def test_local_mass_matrix_properties(affine_triangle_vertices) -> None:
-    """LOC-05: symmetric positive definite, for any affine triangle."""
+    """Symmetric positive definite, for any affine triangle."""
     basis = _make_basis(affine_triangle_vertices, exactness_degree=3)
     mass = _local_bilinear_matrix(
         basis, diffusion=_ZERO_TENSOR, advection=_ZERO_VECTOR, reaction=1.0
@@ -140,7 +135,7 @@ def test_local_mass_matrix_properties(affine_triangle_vertices) -> None:
 @pytest.mark.unit
 @pytest.mark.property
 def test_geometric_scaling() -> None:
-    """LOC-06: for constant coefficients, K_sK == K_K and M_sK == s^2 * M_K."""
+    """For constant coefficients, K_sK == K_K and M_sK == s^2 * M_K."""
     scale = 2.7
     base_vertices = ((0.3, -0.2), (2.1, 0.4), (0.7, 1.8))  # a nontrivial skew triangle
     scaled_vertices = tuple((scale * x, scale * y) for x, y in base_vertices)

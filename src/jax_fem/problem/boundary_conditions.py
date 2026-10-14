@@ -1,32 +1,33 @@
-"""Dirichlet boundary condition data.
-
-See Section 12.2 of the architecture specification.
+"""
+Dirichlet boundary condition data.
 """
 
 from __future__ import annotations
 
 import dataclasses
 
+from jax_fem.mesh.dfn import DfnMesh
 from jax_fem.mesh.triangle import TriangleMesh
 from jax_fem.problem.elliptic import ScalarCoefficient
 
 
 @dataclasses.dataclass(frozen=True, slots=True, eq=False)
 class DirichletCondition:
-    """Association between a set of mesh boundary tags and a Dirichlet value.
-
-    Boundary tags belong to the mesh; the boundary function and the
-    selection of tags belong to the problem (Section 12.2). The mesh
-    determines which facets carry each tag; the finite element space maps
-    those facets to DOFs; this class specifies which tags are Dirichlet and
-    which value function applies.
+    """
+    A Dirichlet value function on a set of mesh boundary tags.
 
     Attributes
     ----------
-    boundary_tags:
-        Mesh boundary facet tags this condition applies to.
-    value:
-        ``g(x)``, the Dirichlet value function.
+    boundary_tags : tuple[int, ...]
+        Mesh boundary facet tags the condition applies to.
+    value : ScalarCoefficient
+        Dirichlet value function ``g(x)``.
+
+    Notes
+    -----
+    The mesh decides which facets carry each tag, the finite element space
+    maps those facets to DOFs, and this class selects the Dirichlet tags and
+    their value function.
     """
 
     boundary_tags: tuple[int, ...]
@@ -34,23 +35,22 @@ class DirichletCondition:
 
 
 def create_full_boundary_dirichlet_condition(
-    mesh: TriangleMesh, value: ScalarCoefficient
+    mesh: TriangleMesh | DfnMesh, value: ScalarCoefficient
 ) -> DirichletCondition:
-    """Convenience constructor: one Dirichlet value on the entire mesh boundary.
-
-    Applies ``value`` to every boundary tag the mesh currently has, i.e.
-    every tag in ``mesh.boundary_tag_names`` (Section 12.2).
+    """
+    Dirichlet condition on the whole mesh boundary.
 
     Parameters
     ----------
-    mesh:
-        The mesh whose boundary tags to cover.
-    value:
-        ``g(x)``, the Dirichlet value function.
+    mesh : TriangleMesh | DfnMesh
+        Mesh whose boundary tags are all covered.
+    value : ScalarCoefficient
+        Dirichlet value function ``g(x)``.
 
     Returns
     -------
-    DirichletCondition
+    condition : DirichletCondition
+        Condition on every tag in ``mesh.boundary_tag_names``.
     """
     return DirichletCondition(
         boundary_tags=tuple(mesh.boundary_tag_names.values()), value=value

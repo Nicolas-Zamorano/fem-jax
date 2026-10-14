@@ -1,5 +1,5 @@
 """
-Plotting Module.
+Plots of solutions, errors, error estimators, and convergence rates.
 """
 
 from __future__ import annotations
@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from jax_fem.diagnostics import compute_energy_error, compute_l2_error
+from jax_fem.diagnostics.trace_fluxes import evaluate_trace_fluxes
 from jax_fem.function import FiniteElementFunction, evaluate_finite_element_function
-from jax_fem.mesh import TriangleMesh
+from jax_fem.mesh import DfnMesh, TriangleMesh, create_fracture_frames
 from jax_fem.problem import EllipticProblem
 from jax_fem.space import CellBasis, FiniteElementSpace, create_cell_basis
 
@@ -23,7 +25,17 @@ if TYPE_CHECKING:
 
 def _import_pyplot():
     """
-    Import ``matplotlib.pyplot``, raising a friendly error if unavailable.
+    Import ``matplotlib.pyplot``.
+
+    Returns
+    -------
+    pyplot : module
+        The ``matplotlib.pyplot`` module.
+
+    Raises
+    ------
+    ImportError
+        If matplotlib is not installed.
     """
     try:
         import matplotlib.pyplot as plt
@@ -38,17 +50,28 @@ def _import_pyplot():
 def _sub_triangulation_for_plotting(
     space: FiniteElementSpace,
 ) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """Build a flat, 3-node-triangle triangulation covering every DOF exactly.
+    """
+    Linear triangulation through every DOF of a P1 or P2 space.
 
-    Matplotlib's ``tripcolor``/``plot_trisurf`` only understand linear
-    (3-node) triangles, but a P2 ``FiniteElementFunction`` has 6 DOFs per
-    cell (3 vertices + 3 edge midpoints) and genuine quadratic curvature
-    between them. Plotting only the 3 corner DOFs would both discard the
-    edge-midpoint DOFs entirely and silently misrepresent a quadratic
-    surface as flat. Instead, each cell is split into 4 linear
-    sub-triangles using the edge midpoints -- an exact (not approximate)
-    piecewise-linear representation of the quadratic surface, using every
-    DOF and introducing no interpolation error of its own::
+    Parameters
+    ----------
+    space : FiniteElementSpace
+        The space to triangulate.
+
+    Returns
+    -------
+    x : jax.Array
+        DOF x-coordinates, shape ``(dofs_test,)``.
+    y : jax.Array
+        DOF y-coordinates, shape ``(dofs_test,)``.
+    triangles : jax.Array
+        DOF indices of each plotting triangle, shape ``(K, 3)`` for P1 and
+        ``(4 K, 3)`` for P2.
+
+    Notes
+    -----
+    Matplotlib only draws 3-node triangles. A P2 cell is split into four
+    triangles through its edge midpoints, so every DOF is used::
 
                v2
               /  \\
@@ -56,32 +79,13 @@ def _sub_triangulation_for_plotting(
            /  \\  /  \\
          v0----m2----v1
 
-    Sub-triangle 0: (v0, m2, m1)  Sub-triangle 1: (v1, m0, m2)
-    Sub-triangle 2: (v2, m1, m0)  Sub-triangle 3 (center): (m0, m1, m2)
-
-    where local DOF 0/1/2 are the vertices and 3/4/5 are the facet
-    midpoints m0/m1/m2 (``LagrangeTriangleP2.entity_dofs``). For P1 (3
-    DOFs/cell, already a flat triangle), this is the identity: the space's
-    own cells are returned unchanged.
-
-    Parameters
-    ----------
-    space : FiniteElementSpace
-        The finite element space to build a plotting triangulation for.
-
-    Returns
-    -------
-    x : jax.Array
-        DOF x-coordinates, shape ``(N_dofs,)``.
-    y : jax.Array
-        DOF y-coordinates, shape ``(N_dofs,)``.
-    triangles : jax.Array
-        Sub-triangle DOF-index connectivity: shape ``(K, 3)`` for a 3-DOF
-        (P1) element, ``(4 * K, 3)`` for a 6-DOF (P2) element.
+    giving ``(v0, m2, m1)``, ``(v1, m0, m2)``, ``(v2, m1, m0)``, and
+    ``(m0, m1, m2)``, where local DOFs 0-2 are the vertices and 3-5 the
+    midpoints ``m0, m1, m2``. P1 cells are returned unchanged.
     """
     number_of_local_dofs = space.element.number_of_local_dofs
-    x = space.dof_coordinates[:, 0, 0]
-    y = space.dof_coordinates[:, 0, 1]
+    x = space.dof_coordinates[..., 0, 0]
+    y = space.dof_coordinates[..., 0, 1]
 
     if number_of_local_dofs == 3:
         return x, y, space.cells_to_dofs
@@ -267,6 +271,19 @@ def plot_convergence_rates(
     log_n_tail = jnp.log(n_dofs[-number_of_tail_points:])
 
     def _fit(errors: jax.Array) -> tuple[float, float]:
+        """
+        Least-squares line through the tail of a log-log error curve.
+
+        Parameters
+        ----------
+        errors : jax.Array
+            Errors sorted by number of DOFs, shape ``(n,)``.
+
+        Returns
+        -------
+        line : tuple[float, float]
+            Slope and intercept of ``log(error)`` against ``log(N_dofs)``.
+        """
         log_errors_tail = jnp.log(errors[-number_of_tail_points:])
         slope, intercept = jnp.polyfit(log_n_tail, log_errors_tail, 1)
         return float(slope), float(intercept)
@@ -349,12 +366,12 @@ def plot_fem_error(
     figure, (axis_energy_error, axis_l2_error) = plt.subplots(1, 2, figsize=(15, 5))
 
     axis_energy_error.set_xlim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 0]).item(),
     )
     axis_energy_error.set_ylim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 1]).item(),
     )
 
     axis_energy_error.set_aspect("equal")
@@ -363,10 +380,10 @@ def plot_fem_error(
     axis_energy_error.set_ylabel("y")
 
     triangle_plot_energy_error = axis_energy_error.tripcolor(
-        mesh.vertex_coordinates[:, 0, 0],
-        mesh.vertex_coordinates[:, 0, 1],
+        mesh.vertex_coordinates[..., 0, 0],
+        mesh.vertex_coordinates[..., 0, 1],
         mesh.cells_to_vertices,
-        facecolors=cell_energy_error.reshape(-1),
+        facecolors=jnp.ravel(cell_energy_error),
         shading="flat",
         edgecolors="k",
         linewidth=0.1,
@@ -378,12 +395,12 @@ def plot_fem_error(
 
     axis_l2_error.set_aspect("equal")
     axis_l2_error.set_xlim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 0]).item(),
     )
     axis_l2_error.set_ylim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 1]).item(),
     )
 
     axis_l2_error.set_title("$L^2$ norm error")
@@ -391,10 +408,10 @@ def plot_fem_error(
     axis_l2_error.set_ylabel("y")
 
     triangle_plot_l2_error = axis_l2_error.tripcolor(
-        mesh.vertex_coordinates[:, 0, 0],
-        mesh.vertex_coordinates[:, 0, 1],
+        mesh.vertex_coordinates[..., 0, 0],
+        mesh.vertex_coordinates[..., 0, 1],
         mesh.cells_to_vertices,
-        facecolors=cell_l2_error.reshape(-1),
+        facecolors=jnp.ravel(cell_l2_error),
         shading="flat",
         edgecolors="k",
         linewidth=0.1,
@@ -411,13 +428,8 @@ def plot_fem_error_3d(
     problem: EllipticProblem,
     mesh: TriangleMesh,
 ) -> Figure:
-    """plot ``L^2`` and energy error on a 3D mesh.
-
-    Renders every DOF, not just mesh vertices: for a P2 solution this uses
-    an exact linear sub-triangulation through the edge-midpoint DOFs too
-    (Section 3 of the implementation plan), so the plotted surface shows
-    the solution's real quadratic curvature rather than a flattened
-    3-vertex-per-cell approximation (see ``_sub_triangulation_for_plotting``).
+    """
+    Plot the solution, exact solution, and error as 3D surfaces.
 
     Parameters
     ----------
@@ -440,7 +452,7 @@ def plot_fem_error_3d(
     space = solution.space
     x, y, triangles = _sub_triangulation_for_plotting(space)
 
-    exact = problem.exact_solution(space.dof_coordinates).reshape(-1, 1)
+    exact = jnp.squeeze(problem.exact_solution(space.dof_coordinates), axis=-2)
     absolute_error = abs(solution.dof_values - exact)
 
     figure, (axis_solution, axis_exact, axis_error) = plt.subplots(
@@ -448,12 +460,12 @@ def plot_fem_error_3d(
     )
 
     axis_solution.set_xlim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 0]).item(),
     )
     axis_solution.set_ylim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 1]).item(),
     )
 
     axis_solution.set_zlim(
@@ -469,19 +481,19 @@ def plot_fem_error_3d(
         x,
         y,
         triangles,
-        solution.dof_values.reshape(-1),
+        jnp.ravel(solution.dof_values),
         cmap="viridis",
         edgecolors="k",
         linewidth=0.1,
     )
 
     axis_exact.set_xlim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 0]).item(),
     )
     axis_exact.set_ylim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 1]).item(),
     )
 
     axis_exact.set_zlim(
@@ -497,19 +509,19 @@ def plot_fem_error_3d(
         x,
         y,
         triangles,
-        exact.reshape(-1),
+        jnp.ravel(exact),
         cmap="viridis",
         edgecolors="k",
         linewidth=0.1,
     )
 
     axis_error.set_xlim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 0]).item(),
     )
     axis_error.set_ylim(
-        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 1]).item(),
     )
 
     axis_error.set_zlim(
@@ -525,7 +537,7 @@ def plot_fem_error_3d(
         x,
         y,
         triangles,
-        absolute_error.reshape(-1),
+        jnp.ravel(absolute_error),
         cmap="viridis",
         edgecolors="k",
         linewidth=0.1,
@@ -545,8 +557,8 @@ def plot_error_estimator_and_marked_cells(
     Parameters
     ----------
     cell_indicators : jax.Array
-        Per-cell indicators ``eta_K``, shape ``(K,)`` (from
-        ``compute_residual_error_estimator``).
+        Per-cell indicators ``eta_K``, shape ``(K, 1, 1, 1)`` (as returned by
+        ``compute_residual_error_estimator``) or ``(K,)``.
     marked_cells : jax.Array
         Boolean mask, shape ``(K,)`` (from
         ``jax_fem.mesh.mark_cells_by_dorfler_bulk_criterion``).
@@ -563,12 +575,12 @@ def plot_error_estimator_and_marked_cells(
     figure, (axis_estimator, axis_marked) = plt.subplots(1, 2, figsize=(15, 5))
 
     x_min, x_max = (
-        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 0]).item(),
     )
     y_min, y_max = (
-        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 1]).item(),
     )
 
     for axis in (axis_estimator, axis_marked):
@@ -580,10 +592,10 @@ def plot_error_estimator_and_marked_cells(
 
     axis_estimator.set_title(r"Residual error estimator $\eta_K$")
     triangle_plot_estimator = axis_estimator.tripcolor(
-        mesh.vertex_coordinates[:, 0, 0],
-        mesh.vertex_coordinates[:, 0, 1],
+        mesh.vertex_coordinates[..., 0, 0],
+        mesh.vertex_coordinates[..., 0, 1],
         mesh.cells_to_vertices,
-        facecolors=jnp.asarray(cell_indicators).reshape(-1),
+        facecolors=jnp.ravel(cell_indicators),
         shading="flat",
         cmap="inferno",
         edgecolors="k",
@@ -594,14 +606,15 @@ def plot_error_estimator_and_marked_cells(
     )
 
     number_marked = int(jnp.sum(marked_cells))
+    number_of_cells = mesh.cells_to_vertices.shape[0]
     axis_marked.set_title(
-        f"Cells marked for refinement ({number_marked}/{mesh.cells_to_vertices.shape[0]})"
+        f"Cells marked for refinement ({number_marked}/{number_of_cells})"
     )
     axis_marked.tripcolor(
-        mesh.vertex_coordinates[:, 0, 0],
-        mesh.vertex_coordinates[:, 0, 1],
+        mesh.vertex_coordinates[..., 0, 0],
+        mesh.vertex_coordinates[..., 0, 1],
         mesh.cells_to_vertices,
-        facecolors=jnp.asarray(marked_cells).astype(float).reshape(-1),
+        facecolors=jnp.ravel(marked_cells).astype(float),
         shading="flat",
         cmap="Reds",
         vmin=0.0,
@@ -620,17 +633,7 @@ def plot_mixed_solution(
     problem: EllipticProblem | None = None,
 ) -> Figure:
     """
-    Plot a mixed (RT0 flux / P0 scalar) solution.
-
-    ``scalar_solution`` (P0) has exactly one DOF per cell, so it plots
-    directly as a flat-shaded ``tripcolor`` -- no sub-triangulation needed
-    (unlike ``plot_fem_error_3d``'s P1/P2 handling). ``flux_solution`` (RT0)
-    is genuinely vector-valued, so it is shown as a per-cell quiver at cell
-    centroids (a degree-1 quadrature rule is exactly the reference
-    triangle's centroid, Section 5.2's ``CellBasis``), colored by magnitude.
-    If ``problem`` is given and provides ``exact_gradient``, a third panel
-    shows the pointwise flux magnitude error against
-    ``sigma_exact = -A grad(u_exact)`` (Section 5.1) at the same centroids.
+    Plot a mixed (RT0 flux, P0 scalar) solution.
 
     Parameters
     ----------
@@ -647,6 +650,14 @@ def plot_mixed_solution(
     -------
     figure : Figure
         The figure containing the plots.
+
+    Notes
+    -----
+    The P0 scalar is drawn flat-shaded, one value per cell. The RT0 flux is
+    drawn as arrows at the cell centroids (the point of the degree-1 rule),
+    colored by magnitude. If ``problem`` provides ``exact_gradient``, a third
+    panel shows the flux error against ``sigma = -A grad u`` at the same
+    points.
     """
     plt = _import_pyplot()
 
@@ -654,10 +665,11 @@ def plot_mixed_solution(
         1
     )
     centroid_basis = create_cell_basis(flux_solution.space, centroid_quadrature)
-    centroids = centroid_basis.physical_points[:, 0, 0, :]  # (K, 2)
-    flux_values = evaluate_finite_element_function(
-        flux_solution, centroid_basis
-    ).values[:, 0, 0, :]  # (K, 2)
+    centroids = jnp.squeeze(centroid_basis.physical_points, axis=(-3, -2))
+    flux_values = jnp.squeeze(
+        evaluate_finite_element_function(flux_solution, centroid_basis).values,
+        axis=(-3, -2),
+    )
     flux_magnitude = jnp.linalg.norm(flux_values, axis=-1)
 
     show_error_panel = problem is not None and problem.exact_gradient is not None
@@ -666,12 +678,12 @@ def plot_mixed_solution(
     axis_scalar, axis_flux = axes[0], axes[1]
 
     x_min, x_max = (
-        jnp.min(mesh.vertex_coordinates[:, 0, 0]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 0]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 0]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 0]).item(),
     )
     y_min, y_max = (
-        jnp.min(mesh.vertex_coordinates[:, 0, 1]).item(),
-        jnp.max(mesh.vertex_coordinates[:, 0, 1]).item(),
+        jnp.min(mesh.vertex_coordinates[..., 0, 1]).item(),
+        jnp.max(mesh.vertex_coordinates[..., 0, 1]).item(),
     )
 
     for axis in axes:
@@ -683,10 +695,10 @@ def plot_mixed_solution(
 
     axis_scalar.set_title("$u_h$ (P0)")
     triangle_plot_scalar = axis_scalar.tripcolor(
-        mesh.vertex_coordinates[:, 0, 0],
-        mesh.vertex_coordinates[:, 0, 1],
+        mesh.vertex_coordinates[..., 0, 0],
+        mesh.vertex_coordinates[..., 0, 1],
         mesh.cells_to_vertices,
-        facecolors=scalar_solution.dof_values.reshape(-1),
+        facecolors=jnp.ravel(scalar_solution.dof_values),
         shading="flat",
         cmap="viridis",
         edgecolors="k",
@@ -696,8 +708,8 @@ def plot_mixed_solution(
 
     axis_flux.set_title(r"$\sigma_h$ (RT0), per-cell centroid")
     axis_flux.triplot(
-        mesh.vertex_coordinates[:, 0, 0],
-        mesh.vertex_coordinates[:, 0, 1],
+        mesh.vertex_coordinates[..., 0, 0],
+        mesh.vertex_coordinates[..., 0, 1],
         mesh.cells_to_vertices,
         color="k",
         linewidth=0.1,
@@ -716,16 +728,16 @@ def plot_mixed_solution(
         axis_error = axes[2]
         exact_gradient = problem.exact_gradient(centroid_basis.physical_points)
         diffusion = problem.diffusion(centroid_basis.physical_points)
-        exact_flux = -(exact_gradient @ diffusion.mT)  # (K, 1, 1, d)
+        exact_flux = -(exact_gradient @ diffusion.mT)
         flux_h = evaluate_finite_element_function(flux_solution, centroid_basis).values
         flux_error_magnitude = jnp.linalg.norm(
-            (flux_h - exact_flux)[:, 0, 0, :], axis=-1
+            jnp.squeeze(flux_h - exact_flux, axis=(-3, -2)), axis=-1
         )
 
         axis_error.set_title(r"$|\sigma_h - \sigma_{exact}|$ at cell centroids")
         triangle_plot_error = axis_error.tripcolor(
-            mesh.vertex_coordinates[:, 0, 0],
-            mesh.vertex_coordinates[:, 0, 1],
+            mesh.vertex_coordinates[..., 0, 0],
+            mesh.vertex_coordinates[..., 0, 1],
             mesh.cells_to_vertices,
             facecolors=flux_error_magnitude,
             shading="flat",
@@ -736,3 +748,182 @@ def plot_mixed_solution(
         figure.colorbar(triangle_plot_error, ax=axis_error, fraction=0.046, pad=0.04)
 
     return figure
+
+
+def plot_fracture_solutions(solution: FiniteElementFunction) -> dict[str, Figure]:
+    """
+    Plot a finite element function on each fracture of a network.
+
+    Parameters
+    ----------
+    solution : FiniteElementFunction
+        P1 or P2 function on a ``DfnMesh``.
+
+    Returns
+    -------
+    figures : dict[str, Figure]
+        One figure per fracture, keyed ``"fracture_<tag>"``.
+
+    Raises
+    ------
+    TypeError
+        If the mesh is not a ``DfnMesh``.
+
+    Notes
+    -----
+    Each fracture is drawn in its own plane, with the in-plane coordinates
+    ``x @ Q_i`` of the frames from ``create_fracture_frames``; the axis
+    labels give the two tangent vectors. All fractures share one colour
+    scale, and each fracture's traces are drawn as black lines. A P2
+    function is drawn on the linear sub-triangulation through all its DOFs.
+    """
+    plt = _import_pyplot()
+    space = solution.space
+    mesh = space.mesh
+    if not isinstance(mesh, DfnMesh):
+        raise TypeError(
+            f"plot_fracture_solutions needs a DfnMesh, got {type(mesh).__name__}."
+        )
+
+    _, _, triangles = _sub_triangulation_for_plotting(space)
+    triangles = np.asarray(triangles)
+    triangle_cells = np.arange(triangles.shape[0]) % mesh.cells_to_vertices.shape[0]
+    triangle_fractures = np.asarray(mesh.cells_to_fractures)[triangle_cells]
+    frames = np.asarray(create_fracture_frames(mesh))
+    dof_coordinates = np.asarray(space.dof_coordinates)[:, 0, :]
+    values = np.asarray(solution.dof_values)[:, 0]
+    vertices = np.asarray(mesh.vertex_coordinates)[:, 0, :]
+    trace_segments = vertices[
+        np.asarray(mesh.facets_to_vertices)[np.asarray(mesh.trace_facets)]
+    ]
+    trace_fractures = np.asarray(mesh.traces_to_fractures)[
+        np.asarray(mesh.trace_facets_to_traces)
+    ]
+
+    figures = {}
+    for fracture, tag in enumerate(np.asarray(mesh.fracture_tags).tolist()):
+        used_dofs, local_triangles = np.unique(
+            triangles[triangle_fractures == fracture], return_inverse=True
+        )
+        planar_points = dof_coordinates[used_dofs] @ frames[fracture]
+
+        figure, axis = plt.subplots(figsize=(7, 5))
+        image = axis.tripcolor(
+            planar_points[:, 0],
+            planar_points[:, 1],
+            np.reshape(local_triangles, (-1, 3)),
+            values[used_dofs],
+            shading="gouraud",
+            vmin=values.min(),
+            vmax=values.max(),
+        )
+        figure.colorbar(image, ax=axis, label="$u_h$")
+
+        segments = (
+            trace_segments[np.any(trace_fractures == fracture, axis=-1)]
+            @ frames[fracture]
+        )
+        if segments.shape[0] > 0:
+            separated = np.concatenate(
+                (segments, np.full((segments.shape[0], 1, 2), np.nan)), axis=-2
+            )
+            lines = np.reshape(separated, (-1, 2))
+            axis.plot(lines[:, 0], lines[:, 1], color="k", linewidth=1.5)
+
+        first_tangent, second_tangent = frames[fracture].T
+        axis.set_aspect("equal")
+        axis.set_title(f"Fracture {tag}")
+        axis.set_xlabel("x · ({:.2f}, {:.2f}, {:.2f})".format(*first_tangent))
+        axis.set_ylabel("x · ({:.2f}, {:.2f}, {:.2f})".format(*second_tangent))
+        figures[f"fracture_{tag}"] = figure
+
+    return figures
+
+
+def plot_trace_fluxes(
+    solution: FiniteElementFunction,
+    basis: CellBasis,
+    transmissivity: jax.Array,
+) -> dict[str, Figure]:
+    """
+    Plot the outflow of both fractures along each trace of a network.
+
+    Parameters
+    ----------
+    solution : FiniteElementFunction
+        P1 or P2 function on a ``DfnMesh``.
+    basis : CellBasis
+        Embedded basis of ``solution.space``.
+    transmissivity : jax.Array
+        Transmissivity tensor of each cell, shape ``(K, 1, 3, 3)``, e.g. from
+        ``evaluate_fracture_transmissivity``.
+
+    Returns
+    -------
+    figures : dict[str, Figure]
+        One figure per trace, keyed ``"trace_<index>"`` in the order of
+        ``mesh.traces_to_fractures``.
+
+    Notes
+    -----
+    Each figure shows, against the arc length along the trace, the outflow
+    of each of the two fractures (see ``evaluate_trace_fluxes``) and their
+    sum, which the flux balance makes zero for the exact solution. The
+    outflows are evaluated at the end points of every trace facet; they are
+    exact there for P1 (constant per facet) and P2 (linear per facet) with a
+    transmissivity constant on each cell, so a P1 outflow appears as a
+    staircase. The legend gives each fracture's total outflow through the
+    trace, integrated with the trapezoidal rule, which is exact for the
+    same reason.
+    """
+    plt = _import_pyplot()
+    mesh = solution.space.mesh
+
+    facet_end_points = jnp.expand_dims(jnp.array([0.0, 1.0]), axis=(0, -2, -1))
+    trace_fluxes = evaluate_trace_fluxes(
+        solution, basis, transmissivity, facet_end_points
+    )
+    arc_lengths = np.asarray(trace_fluxes.arc_lengths)[..., 0, 0]
+    outflows = np.asarray(trace_fluxes.outflows)[..., 0, :]
+    order = np.argsort(arc_lengths, axis=-1)
+    arc_lengths = np.take_along_axis(arc_lengths, order, axis=-1)
+    outflows = np.take_along_axis(outflows, np.expand_dims(order, axis=-1), axis=-2)
+
+    trace_of_facet = np.asarray(mesh.trace_facets_to_traces)
+    trace_tags = np.asarray(mesh.fracture_tags)[np.asarray(mesh.traces_to_fractures)]
+
+    figures = {}
+    for trace, tags in enumerate(trace_tags.tolist()):
+        on_trace = trace_of_facet == trace
+        trace_arc_lengths = arc_lengths[on_trace]
+        trace_outflows = outflows[on_trace]
+        totals = np.sum(
+            0.5
+            * np.sum(trace_outflows, axis=-2)
+            * np.diff(trace_arc_lengths, axis=-1),
+            axis=0,
+        )
+
+        figure, axis = plt.subplots(figsize=(9, 4))
+        for fracture, tag in enumerate(tags):
+            axis.plot(
+                np.ravel(trace_arc_lengths),
+                np.ravel(trace_outflows[..., fracture]),
+                label=f"fracture {tag} (total {totals[fracture]:.3e})",
+            )
+        axis.plot(
+            np.ravel(trace_arc_lengths),
+            np.ravel(np.sum(trace_outflows, axis=-1)),
+            color="k",
+            linestyle="--",
+            linewidth=0.8,
+            label="sum",
+        )
+        axis.axhline(0.0, color="gray", linewidth=0.5)
+        axis.set_title(f"Trace {trace}: fractures {tags[0]} and {tags[1]}")
+        axis.set_xlabel("arc length along the trace")
+        axis.set_ylabel(r"outflow $-\mathbf{K}\nabla u_h \cdot \nu$")
+        axis.legend(loc="center left", bbox_to_anchor=(1.02, 0.5))
+        figures[f"trace_{trace}"] = figure
+
+    return figures

@@ -1,21 +1,12 @@
 """Uniform-refinement convergence study for the P1 discretization.
 
-See Section 19, step 11 ("exact-error functionals and convergence
-examples") of the architecture specification. Mesh refinement itself is out
-of scope for the initial library (Section 2.1): each resolution below is
-built directly as a fresh structured mesh, not by refining a coarser one.
-
-Parameterized over every manufactured problem in ``problem/manufactured.py``
-(Section 12.1) whose exact solution is smooth enough for P1 theory's full
-``O(h^2)``/``O(h)`` rates to apply: ``sin_sin``, ``cos_sin``, ``exponential``,
-and ``simple`` (the general variable-coefficient problem). ``singular`` is
-deliberately excluded -- its solution is only in ``H^{1+2/3-eps}``, so
-uniform refinement does not recover the full rates and a rate assertion
-would either be meaningless or need a much looser, less useful tolerance.
-See ``test_manufactured_problems.py`` for the continuous-level verification
-of each problem's math, independent of this discrete convergence check.
-
-SOL-04 of the FEM testing plan.
+Each resolution is a fresh structured mesh, not a refinement of a coarser
+one. The study covers every manufactured problem whose solution is smooth
+enough for the full P1 rates ``O(h^2)`` in L2 and ``O(h)`` in H1:
+``sin_sin``, ``cos_sin``, ``exponential``, and ``simple``. ``singular`` is
+excluded because its solution is only in ``H^{1+2/3-eps}``, so uniform
+refinement does not reach the full rates. ``test_manufactured_problems.py``
+checks each problem's formulas at the continuous level.
 """
 
 import math
@@ -23,7 +14,7 @@ import math
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
@@ -61,8 +52,14 @@ def _solve_and_measure_errors(
     basis = create_cell_basis(space, quadrature)
 
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values

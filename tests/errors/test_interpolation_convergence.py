@@ -1,9 +1,4 @@
-"""Tests for FiniteElementFunction, interpolation, and evaluation.
-
-See Section 11 of the architecture specification; ERR-03 and ERR-04 of the
-FEM testing plan (the latter, higher-order interpolation convergence,
-covered by ``test_p2_interpolation_l2_convergence_rate`` below).
-"""
+"""Tests for FiniteElementFunction, nodal interpolation, and evaluation."""
 
 import dataclasses
 import math
@@ -11,6 +6,7 @@ import math
 import jax.numpy as jnp
 import pytest
 
+from jax_fem.assembly import gather_vector
 from jax_fem.diagnostics import compute_l2_error
 from jax_fem.element import LagrangeTriangleP1, LagrangeTriangleP2
 from jax_fem.function import (
@@ -27,11 +23,7 @@ from jax_fem.problem import (
 )
 from jax_fem.reference_cell import ReferenceTriangle
 from jax_fem.reference_cell.quadrature import QuadratureRule
-from jax_fem.space import (
-    create_cell_basis,
-    create_finite_element_space,
-    gather_cell_dof_values,
-)
+from jax_fem.space import create_cell_basis, create_finite_element_space
 
 _UNIT_SQUARE_VERTICES = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
 _UNIT_SQUARE_CELLS = ((0, 1, 2), (0, 2, 3))
@@ -51,13 +43,14 @@ def test_finite_element_function_shape_validation() -> None:
 
 
 @pytest.mark.unit
-def test_gather_cell_dof_values() -> None:
+def test_gather_vector_reads_each_cell_dof_values() -> None:
     _, space = _make_space()
-    dof_values = jnp.arange(4.0)[:, None]  # (4, 1): value == dof index
-    function = FiniteElementFunction(space=space, dof_values=dof_values)
-    gathered = gather_cell_dof_values(function)
-    assert gathered.shape == (2, 3, 1)
-    assert jnp.array_equal(gathered, dof_values[space.cells_to_dofs])
+    dof_values = jnp.expand_dims(jnp.arange(4.0), axis=-1)
+    gathered = gather_vector(dof_values, space)
+    assert gathered.shape == (2, 1, 3, 1)
+    assert jnp.array_equal(
+        jnp.squeeze(gathered, axis=-3), dof_values[space.cells_to_dofs]
+    )
 
 
 @pytest.mark.unit
@@ -78,7 +71,7 @@ def test_interpolate_function_matches_dof_coordinates() -> None:
 @pytest.mark.unit
 def test_interpolate_function_non_nodal_element_raises() -> None:
     """interpolate_function is generic over any nodal element (is_nodal ==
-    True, Section 3.2): it dispatches on that flag rather than an
+    True): it dispatches on that flag rather than an
     isinstance check, and rejects a non-nodal element (e.g. a future
     H(div) element).
     """
@@ -116,7 +109,7 @@ def test_interpolate_function_non_nodal_element_raises() -> None:
 def test_polynomial_interpolation_exactness_on_physical_mesh(
     four_triangle_center_vertex_mesh, p1_element
 ) -> None:
-    """ERR-03: DOF coordinates, interpolation, mapping, connectivity, and
+    """DOF coordinates, interpolation, mapping, connectivity, and
     physical evaluation, together, for an affine polynomial (the space P1
     exactly represents). Includes points near, but not only on,
     interelement boundaries -- exercising every cell of the mesh, not
@@ -186,7 +179,7 @@ def test_evaluate_finite_element_function_rejects_mismatched_space() -> None:
 def test_p2_polynomial_interpolation_exactness_on_physical_mesh(
     four_triangle_center_vertex_mesh, p2_element
 ) -> None:
-    """ERR-03 for P2: a full quadratic polynomial (P2's local space exactly)
+    """A full quadratic polynomial (P2's local space exactly)
     interpolated on a physical multi-cell mesh, evaluated at non-nodal
     points -- the P2 analogue of the existing P1 affine-polynomial check.
     """
@@ -240,7 +233,7 @@ def test_p2_polynomial_interpolation_exactness_on_physical_mesh(
 @pytest.mark.convergence
 @pytest.mark.slow
 def test_p2_interpolation_l2_convergence_rate() -> None:
-    """ERR-04: pure nodal-interpolation L2 error (no PDE solve) for a smooth
+    """Pure nodal-interpolation L2 error (no PDE solve) for a smooth
     non-polynomial function converges at P2's approximation-theory rate
     ``O(h^3)``, cheaper to check than the full PDE convergence study
     (``convergence/test_p2_convergence.py``) since it needs no assembly or

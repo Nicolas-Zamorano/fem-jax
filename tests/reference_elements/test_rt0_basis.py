@@ -1,7 +1,4 @@
-"""Tests for the lowest-order Raviart-Thomas RT0 element.
-
-See Section 5.2 of the implementation plan (``.context/implementation_plan.md``).
-"""
+"""Tests for the lowest-order Raviart-Thomas RT0 element."""
 
 import jax
 import jax.numpy as jnp
@@ -40,7 +37,7 @@ def test_rt0_basis_values_shape(rt0_element) -> None:
 
 @pytest.mark.unit
 def test_rt0_exact_basis_values_at_a_point(rt0_element) -> None:
-    """REF-05-style: reproduces psi_0=(x,y), psi_1=(x-1,y), psi_2=(x,y-1)
+    """Reproduces psi_0=(x,y), psi_1=(x-1,y), psi_2=(x,y-1)
     against independently hand-computed values."""
     x, y = 0.3, 0.4
     point = jnp.asarray([[[[x, y]]]])
@@ -65,8 +62,8 @@ def test_rt0_normal_flux_moment_matches_facet(rt0_element) -> None:
     facet_midpoints = jnp.asarray(
         [[0.5, 0.5], [0.0, 0.5], [0.5, 0.0]]
     ).reshape(1, 3, 1, 2)
-    values = rt0_element.tabulate_basis_values(facet_midpoints)  # (1, 3, 3, 2)
-    normals = reference_cell.facet_normals  # (3, 2)
+    values = rt0_element.tabulate_basis_values(facet_midpoints)
+    normals = reference_cell.facet_normals
     facet_lengths = jnp.asarray([2.0**0.5, 1.0, 1.0])  # facets 0, 1, 2
 
     # moment[e, i] = (psi_i(midpoint_e) . normal_e) * length_e
@@ -75,7 +72,7 @@ def test_rt0_normal_flux_moment_matches_facet(rt0_element) -> None:
             jnp.einsum("id,d->i", values[0, e], normals[e]) * facet_lengths[e]
             for e in range(3)
         ]
-    )  # (facet, basis_index)
+    )
     assert jnp.allclose(moment, jnp.eye(3), atol=1e-13)
 
 
@@ -89,11 +86,11 @@ def test_rt0_divergence_matches_autodiff(rt0_element) -> None:
     points = jax.random.uniform(key, (5, 2))
     tabulated = rt0_element.tabulate_basis_divergences(
         points.reshape(1, 5, 1, 2)
-    )  # (1, 1, 3, 1): constant, broadcasts against all 5 points
+    )  # constant, broadcasts against all 5 points
 
     for index in range(3):
         for point in points:
-            jacobian = jax.jacobian(lambda p: psi(p, index))(point)  # (2, 2)
+            jacobian = jax.jacobian(lambda p, index=index: psi(p, index))(point)
             autodiff_divergence = jnp.trace(jacobian)
             assert autodiff_divergence == pytest.approx(
                 float(tabulated[0, 0, index, 0]), abs=1e-12

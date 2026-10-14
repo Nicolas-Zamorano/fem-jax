@@ -1,6 +1,5 @@
-"""The canonical reference triangle.
-
-See Section 8.2 of the architecture specification.
+"""
+The reference triangle.
 """
 
 from __future__ import annotations
@@ -16,7 +15,6 @@ from jax_fem.reference_cell.quadrature import (
     create_triangle_quadrature,
 )
 
-# The standard reference triangle K_hat = conv{(0, 0), (1, 0), (0, 1)}.
 _VERTEX_COORDINATES = ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0))
 
 # Local facet i is opposite local vertex i:
@@ -33,27 +31,27 @@ _MEASURE = 0.5
 
 @dataclasses.dataclass(frozen=True, slots=True, eq=False)
 class ReferenceTriangle:
-    """The standard reference triangle ``conv{(0, 0), (1, 0), (0, 1)}``.
-
-    Stores only geometric and topological reference data and provides
-    access to triangle-compatible quadrature rules. It owns no
-    finite-element basis and no physical mesh (Section 20). All fields are
-    fixed constants of the reference cell; the class takes no constructor
-    arguments.
+    """
+    The reference triangle ``conv{(0, 0), (1, 0), (0, 1)}``.
 
     Attributes
     ----------
-    dimension:
+    dimension : int
         Always ``2``.
-    vertex_coordinates:
-        Reference vertex coordinates, shape ``(3, 2)``.
-    facets_to_vertices:
-        Local vertex indices of each reference edge, shape ``(3, 2)``.
-        Facet ``i`` is opposite local vertex ``i``.
-    facet_normals:
-        Outward unit normal of each reference edge, shape ``(3, 2)``.
-    measure:
-        Exact area of the reference triangle, ``0.5``.
+    vertex_coordinates : jax.Array
+        Vertex coordinates, shape ``(3, 2)``.
+    facets_to_vertices : jax.Array
+        Local vertex indices of each edge, shape ``(3, 2)``; facet ``i`` is
+        opposite local vertex ``i``.
+    facet_normals : jax.Array
+        Outward unit normal of each edge, shape ``(3, 2)``.
+    measure : float
+        Area of the triangle, ``0.5``.
+
+    Notes
+    -----
+    Holds only reference geometry and topology, with no basis and no
+    physical mesh. The class takes no constructor arguments.
     """
 
     dimension: int = dataclasses.field(default=2, init=False)
@@ -70,8 +68,18 @@ class ReferenceTriangle:
     measure: float = dataclasses.field(default=_MEASURE, init=False)
 
     def create_quadrature(self, exactness_degree: int) -> QuadratureRule:
-        """Return a triangle quadrature rule exact to at least ``exactness_degree``.
+        """
+        Quadrature rule on this triangle.
 
-        See ``create_triangle_quadrature`` for the exactness-selection rule.
+        Parameters
+        ----------
+        exactness_degree : int
+            Minimum polynomial exactness degree, at least one.
+
+        Returns
+        -------
+        quadrature : QuadratureRule
+            Rule exact to at least ``exactness_degree`` (see
+            ``create_triangle_quadrature``).
         """
         return create_triangle_quadrature(self, exactness_degree)

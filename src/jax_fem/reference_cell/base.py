@@ -1,6 +1,5 @@
-"""Reference-cell interface shared by all reference cell types.
-
-See Section 8.1 of the architecture specification.
+"""
+Reference-cell interface shared by all reference cell types.
 """
 
 from __future__ import annotations
@@ -14,31 +13,28 @@ from jax_fem.reference_cell.quadrature import QuadratureRule
 
 @runtime_checkable
 class ReferenceCell(Protocol):
-    """Canonical geometry and topology of a reference cell.
-
-    A ``ReferenceCell`` describes the fixed geometric object that all
-    physical cells of one topological type are mapped from. It owns
-    reference geometry, topology, and valid quadrature construction. It owns
-    neither a finite-element basis nor any physical mesh data (Section 20).
+    """
+    Geometry and topology of a reference cell.
 
     Attributes
     ----------
-    dimension:
-        Topological and geometric dimension of the reference cell.
-    vertex_coordinates:
-        Coordinates of the reference cell's vertices, shape
-        ``(n_vertices, dimension)``.
-    facets_to_vertices:
-        Local vertex indices bounding each reference facet, shape
+    dimension : int
+        Dimension of the reference cell.
+    vertex_coordinates : jax.Array
+        Vertex coordinates, shape ``(n_vertices, dimension)``.
+    facets_to_vertices : jax.Array
+        Local vertex indices of each facet, shape
         ``(n_facets, n_vertices_per_facet)``.
-    facet_normals:
-        Outward unit normal of each reference facet, shape
-        ``(n_facets, dimension)``.
-    measure:
-        Exact geometric measure (length/area/volume) of the reference cell
-        itself. Not a quadrature-derived quantity: it is used only to
-        convert normalized quadrature weights into physical integration
-        weights (Section 6.3).
+    facet_normals : jax.Array
+        Outward unit normal of each facet, shape ``(n_facets, dimension)``.
+    measure : float
+        Exact measure (length, area, or volume) of the reference cell.
+
+    Notes
+    -----
+    Physical cells of one topological type are images of their reference
+    cell. ``measure`` converts normalized quadrature weights into physical
+    weights. A reference cell holds no basis and no physical mesh data.
     """
 
     dimension: int
@@ -48,18 +44,18 @@ class ReferenceCell(Protocol):
     measure: float
 
     def create_quadrature(self, exactness_degree: int) -> QuadratureRule:
-        """Return a quadrature rule valid on this cell.
+        """
+        Quadrature rule on this cell.
 
         Parameters
         ----------
-        exactness_degree:
-            Minimum polynomial exactness degree required.
+        exactness_degree : int
+            Minimum polynomial exactness degree.
 
         Returns
         -------
-        QuadratureRule
-            A rule exact for polynomials of total degree at most
-            ``exactness_degree`` (the actual exactness may be higher; see
-            ``QuadratureRule.exactness_degree``).
+        quadrature : QuadratureRule
+            Rule exact for polynomials of total degree up to
+            ``exactness_degree``; its actual exactness may be higher.
         """
         ...

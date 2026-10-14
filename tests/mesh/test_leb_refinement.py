@@ -1,8 +1,7 @@
 """Tests for the in-house Rivara Longest Edge Bisection (LEB) AMR engine.
 
-See ``context/in_house_amr_implementation_plan.md``. ``mark_cells_by_dorfler_bulk_criterion``
-is tested Gmsh-free in ``test_amr_marking.py``; this file exercises the pure
-``TriangleMesh`` -> ``TriangleMesh`` refinement engine
+``mark_cells_by_dorfler_bulk_criterion`` is tested in ``test_amr_marking.py``;
+this file exercises the ``TriangleMesh`` -> ``TriangleMesh`` refinement
 (``refine_mesh_longest_edge_bisection``) on small, hand-built meshes, with
 no external meshing engine involved.
 """
@@ -69,7 +68,7 @@ def _structured_unit_square_mesh(number_of_cells_per_side: int):
 def _min_interior_angle_degrees(mesh) -> float:
     vertices = np.asarray(mesh.vertex_coordinates[:, 0, :])
     cells = np.asarray(mesh.cells_to_vertices)
-    triangles = vertices[cells]  # (K, 3, 2)
+    triangles = vertices[cells]
 
     min_angle = np.inf
     for triangle in triangles:

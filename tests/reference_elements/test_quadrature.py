@@ -1,16 +1,9 @@
-"""Tests for reference-triangle quadrature rules.
+"""Tests for the reference quadrature rules.
 
-See Section 8.3 of the architecture specification; QUA-01 of the FEM
-testing plan.
-
-QUA-01's pass condition sums weights to ``|K_hat| = 1/2``. This library
-uses a different, deliberate convention (Section 6.2/8.3): weights are
-normalized to sum to ``1`` (a barycentric partition, independent of the
-reference cell's measure), and ``reference_cell.measure`` supplies the
-``1/2`` factor separately when converting to physical integration weights.
-``test_weights_sum_to_one`` and the ``reference_triangle.measure *`` factor
-in ``test_exact_for_all_monomials_up_to_degree`` reflect that convention
-rather than QUA-01's literal wording.
+Weights are normalized to sum to one, and ``reference_cell.measure`` supplies
+the ``|K_hat| = 1/2`` factor when converting to physical weights;
+``test_weights_sum_to_one`` and the ``reference_triangle.measure`` factor in
+``test_exact_for_all_monomials_up_to_degree`` reflect that convention.
 """
 
 import math
@@ -61,7 +54,7 @@ def test_degree_three_reuses_degree_four_rule(reference_triangle) -> None:
 def test_exact_for_all_monomials_up_to_degree(
     requested_degree: int, reference_triangle
 ) -> None:
-    """QUA-01: every monomial of total degree <= the rule's exactness is exact."""
+    """Every monomial of total degree <= the rule's exactness is exact."""
     quadrature = reference_triangle.create_quadrature(requested_degree)
     x = quadrature.points[0, :, 0, 0]
     y = quadrature.points[0, :, 0, 1]
@@ -90,7 +83,7 @@ def test_exactness_degree_beyond_table_raises(reference_triangle) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1D reference-interval quadrature (Section 4.2: FacetBasis)
+# 1D reference-interval quadrature, used by FacetBasis
 # ---------------------------------------------------------------------------
 
 

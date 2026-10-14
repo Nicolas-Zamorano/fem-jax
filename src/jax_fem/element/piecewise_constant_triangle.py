@@ -1,5 +1,5 @@
 """
-Scalar discontinuous P0 (piecewise-constant) element on the reference triangle.
+Scalar piecewise-constant P0 element on the reference triangle.
 """
 
 from __future__ import annotations
@@ -21,38 +21,34 @@ _P0_ENTITY_DOFS: dict[int, tuple[tuple[int, ...], ...]] = {
 @dataclasses.dataclass(frozen=True, slots=True, eq=False)
 class PiecewiseConstantTriangleP0:
     """
-    Scalar discontinuous P0 (piecewise-constant) element on the reference triangle.
-
-    One local DOF per cell, ``entity_dofs`` cell-owned only (dimension 2):
-    ``FiniteElementSpace`` therefore numbers one global DOF per mesh cell,
-    with ``dof_coordinates`` at each cell's centroid (``entity_dofs``'
-    generic dimension-2 handling, Section 3.2 -- unchanged for this
-    element). Interpolation (``is_nodal = True``) evaluates a physical
-    function at that centroid as an approximation to its true cell average;
-    exact for any function already constant per cell (e.g. an interpolated
-    ``PiecewiseConstantTriangleP0`` field itself), and to leading order in
-    ``h`` otherwise -- consistent with the ``O(h)`` accuracy this element
-    targets in the mixed formulation (Section 5).
+    Scalar piecewise-constant P0 element on the reference triangle.
 
     Attributes
     ----------
     reference_cell : ReferenceTriangle
-        The ``ReferenceTriangle`` this element is defined on.
+        The reference triangle the element is defined on.
     polynomial_degree : int
         Always ``0``.
     number_of_local_dofs : int
         Always ``1``.
     value_shape : tuple[int, ...]
-        Always ``(1,)`` (scalar-valued).
+        Always ``(1,)``.
     entity_dofs : dict[int, tuple[tuple[int, ...], ...]]
-        ``{0: ((), (), ()), 1: ((), (), ()), 2: ((0,),)}``: the single local
-        DOF is cell-interior-owned.
+        ``{0: ((), (), ()), 1: ((), (), ()), 2: ((0,),)}``; the single DOF is
+        owned by the cell interior.
     is_nodal : bool
-        Always ``True`` (centroid evaluation, see above).
+        Always ``True``.
     mapping : str
         Always ``"identity"``.
     is_orientation_dependent : bool
         Always ``False``.
+
+    Notes
+    -----
+    The space has one DOF per cell, located at the cell centroid.
+    Interpolation evaluates a function at the centroid, which approximates
+    its cell average to leading order in ``h`` and is exact for functions
+    that are already constant on each cell.
     """
 
     reference_cell: ReferenceTriangle
@@ -67,41 +63,54 @@ class PiecewiseConstantTriangleP0:
     is_orientation_dependent: bool = dataclasses.field(default=False, init=False)
 
     def tabulate_basis_values(self, reference_points: jax.Array) -> jax.Array:
-        """The single constant basis function, ``phi_0 = 1``.
+        """
+        Evaluate the constant basis function at reference points.
 
         Parameters
         ----------
         reference_points : jax.Array
-            Points in reference coordinates, shape ``(B, Q, 1, 2)``.
+            Reference points, shape ``(B, Q, 1, 2)``.
 
         Returns
         -------
         basis_values : jax.Array
-            Basis values, shape ``(B, Q, 1, 1)``, identically ``1``.
+            Ones, shape ``(B, Q, 1, 1)``.
         """
         _validate_reference_points(reference_points)
-        return jnp.ones(
-            (reference_points.shape[0], reference_points.shape[1], 1, 1)
-        )
+        return jnp.ones(reference_points.shape[:-2] + (1, 1))
 
     def tabulate_basis_gradients(self, reference_points: jax.Array) -> jax.Array:
-        """The (zero) reference gradient of the constant basis function.
+        """
+        Evaluate the reference gradient of the constant basis function.
 
         Parameters
         ----------
         reference_points : jax.Array
-            Points in reference coordinates, shape ``(B, Q, 1, 2)``.
+            Reference points, shape ``(B, Q, 1, 2)``.
 
         Returns
         -------
         basis_gradients : jax.Array
-            Basis gradients, shape ``(B, 1, 1, 2)``, identically ``0``.
+            Zeros, shape ``(B, 1, 1, 2)``.
         """
         _validate_reference_points(reference_points)
-        return jnp.zeros((reference_points.shape[0], 1, 1, 2))
+        return jnp.zeros((reference_points.shape[-4], 1, 1, 2))
 
 
 def _validate_reference_points(reference_points: jax.Array) -> None:
+    """
+    Check that reference points have shape ``(B, Q, 1, 2)``.
+
+    Parameters
+    ----------
+    reference_points : jax.Array
+        Points to check.
+
+    Raises
+    ------
+    ValueError
+        If the shape is not ``(B, Q, 1, 2)``.
+    """
     if reference_points.ndim != 4 or reference_points.shape[2:] != (1, 2):
         raise ValueError(
             "reference_points must have shape (B, Q, 1, 2) for some batch "

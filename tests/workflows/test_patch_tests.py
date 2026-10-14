@@ -1,13 +1,9 @@
-"""End-to-end affine and quadratic patch tests.
-
-See Section 16 of the architecture specification (the typical workflow,
-exercised here end to end); SOL-01 and SOL-02 of the FEM testing plan.
-"""
+"""End-to-end affine and quadratic patch tests of the typical workflow."""
 
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
@@ -36,7 +32,7 @@ from jax_fem.space import create_cell_basis, create_finite_element_space
 @pytest.mark.integration
 @pytest.mark.end_to_end
 def test_affine_patch_test(four_triangle_center_vertex_mesh, p1_element) -> None:
-    """SOL-01: geometry, P1 completeness, assembly, condensation, and
+    """Geometry, P1 completeness, assembly, condensation, and
     reconstruction, together, on the four-triangle mesh with a genuine
     interior DOF. u = 1 + 2x - 3y, f = 0, A = I, g = u|_boundary; the
     discrete solution must equal u_exact at every DOF coordinate exactly
@@ -62,8 +58,14 @@ def test_affine_patch_test(four_triangle_center_vertex_mesh, p1_element) -> None
         ),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values
@@ -89,9 +91,9 @@ def test_affine_patch_test(four_triangle_center_vertex_mesh, p1_element) -> None
 @pytest.mark.end_to_end
 @pytest.mark.parametrize("resolution", [1, 2, 3])
 def test_affine_patch_test_holds_under_refinement(resolution: int) -> None:
-    """SOL-01, parameterized over refinements of the center-vertex mesh.
+    """Affine patch test, parameterized over refinements of the center-vertex mesh.
 
-    Mesh refinement itself is out of scope (Section 2.1): each level is a
+    Mesh refinement itself is out of scope: each level is a
     fresh structured n x n mesh rather than a literal refinement of the
     four-triangle mesh, but every level still has interior free DOFs.
     """
@@ -114,8 +116,14 @@ def test_affine_patch_test_holds_under_refinement(resolution: int) -> None:
         ),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values
@@ -132,7 +140,7 @@ def test_affine_patch_test_holds_under_refinement(resolution: int) -> None:
 @pytest.mark.integration
 @pytest.mark.end_to_end
 def test_quadratic_patch_test_p2(four_triangle_center_vertex_mesh) -> None:
-    """SOL-02: P2 exactly reproduces a full quadratic solution end to end.
+    """P2 exactly reproduces a full quadratic solution end to end.
 
     ``u = c0 + c1 x + c2 y + c3 x^2 + c4 x y + c5 y^2`` belongs to P2's
     local space exactly, so with ``f = -Laplacian(u)`` (constant, since the
@@ -167,8 +175,14 @@ def test_quadratic_patch_test_p2(four_triangle_center_vertex_mesh) -> None:
         ),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     dirichlet_dofs, dirichlet_values = evaluate_dirichlet_dof_values(problem, space)
     condensed = condense_dirichlet_system(
         matrix, vector, dirichlet_dofs, dirichlet_values

@@ -1,7 +1,4 @@
-"""Tests for the mixed (H(div) flux) error diagnostics.
-
-See Section 5.4 of the implementation plan (``.context/implementation_plan.md``).
-"""
+"""Tests for the error norms of a mixed (H(div)) flux solution."""
 
 import jax.numpy as jnp
 import pytest
@@ -13,8 +10,8 @@ from jax_fem.diagnostics import (
     compute_l2_error,
 )
 from jax_fem.diagnostics.mixed_norms import (
-    flux_divergence_l2_error_density,
-    flux_l2_error_density,
+    flux_divergence_l2_error_functional,
+    flux_l2_error_functional,
 )
 from jax_fem.element import PiecewiseConstantTriangleP0, RaviartThomasTriangleRT0
 from jax_fem.function import FiniteElementFunction, evaluate_finite_element_function
@@ -45,8 +42,8 @@ def _solve(mesh, resolution_quadrature_degree: int = 4):
 @pytest.mark.integration
 def test_flux_errors_decrease_under_refinement() -> None:
     """A harmonic (f = 0) solution with g = 0 on the *entire* boundary would
-    force the trivial u == 0 by uniqueness (Section 5.3's g = 0 scoping
-    admits no nontrivial "exactly representable" zero-data case), so this
+    force the trivial u == 0 by uniqueness (with only g = 0 supported there
+    is no nontrivial exactly representable zero-data case), so this
     checks monotonic decrease under refinement instead of an exact-zero
     reproduction -- the meaningful correctness signal available within that
     scoping.
@@ -84,7 +81,9 @@ def test_flux_errors_are_small_positive_and_finite_for_smooth_problem() -> None:
     )
 
     flux_error = float(compute_flux_l2_error(sigma_h, basis_sigma, problem))
-    flux_div_error = float(compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem))
+    flux_div_error = float(
+        compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem)
+    )
     u_error = float(compute_l2_error(u_h, basis_u, problem))
 
     assert 0.0 < flux_error < 1.0
@@ -114,7 +113,7 @@ def test_flux_l2_error_requires_exact_gradient() -> None:
 @pytest.mark.unit
 @pytest.mark.property
 def test_flux_cellwise_and_global_error_consistency() -> None:
-    """ERR-02-style: sum of cellwise squared flux errors equals the square
+    """Sum of cellwise squared flux errors equals the square
     of the global error."""
     mesh = create_gmsh_unit_square_mesh(4)
     space_sigma, space_u, basis_sigma, basis_u = _solve(mesh)
@@ -129,15 +128,19 @@ def test_flux_cellwise_and_global_error_consistency() -> None:
     from jax_fem.assembly import integrate_cellwise
 
     fields = {"solution": evaluate_finite_element_function(sigma_h, basis_sigma)}
-    density = flux_l2_error_density(basis_sigma, fields, problem)
-    cellwise_squared = integrate_cellwise(density, basis_sigma.physical_weights)
+    functional_values = flux_l2_error_functional(basis_sigma, fields, problem)
+    cellwise_squared = integrate_cellwise(
+        functional_values, basis_sigma.physical_weights
+    )
     global_error = compute_flux_l2_error(sigma_h, basis_sigma, problem)
     assert float(jnp.sum(cellwise_squared)) == pytest.approx(
         float(global_error) ** 2, rel=1e-12
     )
 
-    div_density = flux_divergence_l2_error_density(basis_sigma, fields, problem)
-    div_cellwise_squared = integrate_cellwise(div_density, basis_sigma.physical_weights)
+    div_functional = flux_divergence_l2_error_functional(basis_sigma, fields, problem)
+    div_cellwise_squared = integrate_cellwise(
+        div_functional, basis_sigma.physical_weights
+    )
     global_div_error = compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem)
     assert float(jnp.sum(div_cellwise_squared)) == pytest.approx(
         float(global_div_error) ** 2, rel=1e-12

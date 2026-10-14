@@ -1,13 +1,12 @@
 """Uniform-refinement convergence study for the mixed RT0/P0 discretization.
 
-See Section 5.4 of the implementation plan (``.context/implementation_plan.md``):
+Expected rates:
 
     ||sigma - sigma_h||_L2 = O(h), ||div(sigma - sigma_h)||_L2 = O(h),
     ||u - u_h||_L2 = O(h)
 
-Uses ``create_poisson_sin_sin_problem`` (Section 5.3's scoping: only
-homogeneous Dirichlet data is supported, and this solution vanishes on the
-whole unit-square boundary).
+Uses ``create_poisson_sin_sin_problem``: the mixed system supports only
+homogeneous Dirichlet data, and this solution vanishes on the whole boundary.
 """
 
 import math
@@ -52,7 +51,9 @@ def _errors_at_resolution(n: int) -> tuple[int, float, float, float]:
     )
 
     flux_error = float(compute_flux_l2_error(sigma_h, basis_sigma, problem))
-    flux_div_error = float(compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem))
+    flux_div_error = float(
+        compute_flux_divergence_l2_error(sigma_h, basis_sigma, problem)
+    )
     u_error = float(compute_l2_error(u_h, basis_u, problem))
     cells = mesh.cells_to_vertices.shape[0]
     return cells, flux_error, flux_div_error, u_error
@@ -67,7 +68,9 @@ def test_mixed_rt0_p0_convergence_rates_and_monotonicity() -> None:
     u_errors = [r[3] for r in results]
 
     assert all(a > b for a, b in zip(flux_errors, flux_errors[1:], strict=False))
-    assert all(a > b for a, b in zip(flux_div_errors, flux_div_errors[1:], strict=False))
+    assert all(
+        a > b for a, b in zip(flux_div_errors, flux_div_errors[1:], strict=False)
+    )
     assert all(a > b for a, b in zip(u_errors, u_errors[1:], strict=False))
 
     for (cells_coarse, flux_c, div_c, u_c), (cells_fine, flux_f, div_f, u_f) in zip(

@@ -1,22 +1,23 @@
 """
-Block saddle-point system assembly for the mixed Poisson formulation.
+Block saddle-point system for the mixed Poisson formulation.
 """
 
 from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
-from jax.experimental import sparse as jax_sparse
 
-from jax_fem.assembly.matrix import GlobalMatrix, assemble_bilinear_form
-from jax_fem.assembly.vector import assemble_linear_form
+from jax_fem.assembly.global_assembly import (
+    GlobalMatrix,
+    assemble_matrix,
+    assemble_vector,
+    combine_matrix_blocks,
+)
+from jax_fem.assembly.integration import integrate_cellwise
 from jax_fem.forms.elliptic import elliptic_linear_form
 from jax_fem.forms.mixed import elliptic_mixed_div_form, elliptic_mixed_mass_form
 from jax_fem.problem.elliptic import EllipticProblem, evaluate_elliptic_coefficients
 from jax_fem.space.cell_basis import CellBasis
-
-#: Alias for assemble_bilinear_form when assembling mixed/two-space forms.
-assemble_mixed_bilinear_form = assemble_bilinear_form
 
 
 def assemble_mixed_system(
@@ -25,26 +26,25 @@ def assemble_mixed_system(
     problem: EllipticProblem,
 ) -> tuple[GlobalMatrix, jax.Array]:
     r"""
-    Assemble the mixed Poisson saddle-point block system.
+    Assemble the mixed Poisson saddle-point system.
 
     Parameters
     ----------
     basis_sigma : CellBasis
-        Evaluated H(div) geometry and basis (``mapping ==
-        "contravariant_piola"``, e.g. RT0).
+        Evaluated H(div) basis (``mapping == "contravariant_piola"``, e.g.
+        RT0).
     basis_u : CellBasis
-        Evaluated scalar geometry and basis (``mapping == "identity"``,
-        e.g. P0). Must share the cells and quadrature points of
-        ``basis_sigma``.
+        Evaluated scalar basis (``mapping == "identity"``, e.g. P0), on the
+        cells and quadrature points of ``basis_sigma``.
     problem : EllipticProblem
-        The elliptic problem; only ``.diffusion`` and ``.source`` are used.
+        The elliptic problem; only ``diffusion`` and ``source`` are used.
 
     Returns
     -------
     block_matrix : GlobalMatrix
-        Saddle-point matrix, shape ``(N_sigma + N_u, N_sigma + N_u)``.
+        Saddle-point matrix, shape ``(dofs_sigma + dofs_u, dofs_sigma + dofs_u)``.
     rhs : jax.Array
-        Right-hand side ``[0; F]``, shape ``(N_sigma + N_u, 1)``.
+        Right-hand side ``[0; F]``, shape ``(dofs_sigma + dofs_u, 1)``.
 
     Notes
     -----
@@ -53,59 +53,50 @@ def assemble_mixed_system(
     .. math::
         \begin{bmatrix} M & -B^T \\ B & 0 \end{bmatrix}
         \begin{bmatrix} \sigma \\ u \end{bmatrix} =
-        \begin{bmatrix} G \\ F \end{bmatrix}
+        \begin{bmatrix} 0 \\ F \end{bmatrix}
 
-    where ``M`` is ``elliptic_mixed_mass_form`` (single-space) and ``B`` is
-    ``elliptic_mixed_div_form`` (P0 test space, RT0 trial space), both
-    assembled with ``assemble_bilinear_form``. The blocks are combined
-    directly at the sparse ``(data, indices)`` level, offsetting ``B``'s
-    row/column indices into the combined numbering.
+    with ``M`` from ``elliptic_mixed_mass_form`` and ``B`` from
+    ``elliptic_mixed_div_form`` (scalar test space, H(div) trial space).
 
-    Only homogeneous Dirichlet data (``g = 0``) is supported, so ``G = 0``
-    identically and is omitted: the general natural boundary term
-    ``-int_{Gamma_D} g (tau . n) ds`` needs boundary-facet integration of
-    the H(div) trace, which this library does not yet provide.
+    Only homogeneous Dirichlet data is supported: the natural boundary term
+    ``-int_{Gamma_D} g (tau . n) ds`` would need boundary-facet integration of
+    the H(div) trace, which the library does not provide.
     ``problem.dirichlet_conditions`` is not consulted, and advection and
-    reaction are not part of the mixed Poisson formulation, even though
-    ``problem.advection`` and ``problem.reaction`` must still be valid
-    callables to satisfy ``EllipticProblem``.
+    reaction are not part of the mixed Poisson formulation.
     """
-    n_sigma = basis_sigma.space.number_of_dofs
-    n_u = basis_u.space.number_of_dofs
-
     coefficients_sigma = evaluate_elliptic_coefficients(
         problem, basis_sigma.physical_points
     )
-    mass_matrix = assemble_bilinear_form(
-        elliptic_mixed_mass_form, basis_sigma, coefficients=coefficients_sigma
+    mass_matrix = assemble_matrix(
+        integrate_cellwise(
+            elliptic_mixed_mass_form(basis_sigma, basis_sigma, coefficients_sigma),
+            basis_sigma.physical_weights,
+        ),
+        basis_sigma.space,
+        basis_sigma.space,
     )
-    div_matrix = assemble_bilinear_form(elliptic_mixed_div_form, basis_u, basis_sigma)
-
-    m_rows, m_cols = mass_matrix.indices[..., 0], mass_matrix.indices[..., 1]
-    b_rows, b_cols = div_matrix.indices[..., 0], div_matrix.indices[..., 1]
-
-    # Top-right block -B^T: sigma-numbered rows, u-numbered columns (offset
-    # into the combined numbering).
-    bt_rows = b_cols
-    bt_cols = b_rows + n_sigma
-    # Bottom-left block B: u-numbered rows (offset), sigma-numbered columns.
-    b_block_rows = b_rows + n_sigma
-    b_block_cols = b_cols
-
-    all_rows = jnp.concatenate((m_rows, bt_rows, b_block_rows), axis=-1)
-    all_cols = jnp.concatenate((m_cols, bt_cols, b_block_cols), axis=-1)
-    all_data = jnp.concatenate(
-        (mass_matrix.data, -div_matrix.data, div_matrix.data), axis=-1
+    divergence_matrix = assemble_matrix(
+        integrate_cellwise(
+            elliptic_mixed_div_form(basis_u, basis_sigma, None),
+            basis_u.physical_weights,
+        ),
+        basis_u.space,
+        basis_sigma.space,
     )
-
-    total_dofs = n_sigma + n_u
-    block_matrix = jax_sparse.BCOO(
-        (all_data, jnp.stack((all_rows, all_cols), axis=-1)),
-        shape=(total_dofs, total_dofs),
+    block_matrix = combine_matrix_blocks(
+        ((mass_matrix, -divergence_matrix.T), (divergence_matrix, None))
     )
 
     coefficients_u = evaluate_elliptic_coefficients(problem, basis_u.physical_points)
-    load_vector = assemble_linear_form(elliptic_linear_form, basis_u, coefficients_u)
-    rhs = jnp.concatenate((jnp.zeros((n_sigma, 1)), load_vector), axis=-2)
+    load_vector = assemble_vector(
+        integrate_cellwise(
+            elliptic_linear_form(basis_u, coefficients_u), basis_u.physical_weights
+        ),
+        basis_u.space,
+    )
+    flux_rhs = jnp.zeros(
+        (basis_sigma.space.number_of_dofs, 1), dtype=load_vector.dtype
+    )
+    rhs = jnp.concatenate((flux_rhs, load_vector), axis=-2)
 
     return block_matrix, rhs

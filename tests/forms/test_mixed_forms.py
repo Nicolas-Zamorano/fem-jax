@@ -1,7 +1,4 @@
-"""Tests for the mixed (H(div) x L^2) forms.
-
-See Section 5.3 of the implementation plan (``.context/implementation_plan.md``).
-"""
+"""Tests for the mixed (H(div) x L^2) forms."""
 
 import jax.numpy as jnp
 import pytest
@@ -23,7 +20,9 @@ _REFERENCE_TRIANGLE_VERTICES = ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0))
 _SINGLE_CELL = ((0, 1, 2),)
 
 
-def _spaces_and_bases(vertices=_REFERENCE_TRIANGLE_VERTICES, cells=_SINGLE_CELL, degree=4):
+def _spaces_and_bases(
+    vertices=_REFERENCE_TRIANGLE_VERTICES, cells=_SINGLE_CELL, degree=4
+):
     mesh = create_triangle_mesh_from_arrays(vertices, cells)
     rt0 = RaviartThomasTriangleRT0(reference_cell=ReferenceTriangle())
     p0 = PiecewiseConstantTriangleP0(reference_cell=ReferenceTriangle())
@@ -48,7 +47,7 @@ def test_mixed_mass_form_is_gram_matrix_for_identity_diffusion() -> None:
         dirichlet_conditions=(),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis_sigma.physical_points)
-    local_matrix = elliptic_mixed_mass_form(basis_sigma, coefficients)
+    local_matrix = elliptic_mixed_mass_form(basis_sigma, basis_sigma, coefficients)
     expected = basis_sigma.values @ basis_sigma.values.mT
 
     assert local_matrix.shape == basis_sigma.values.shape[:2] + (3, 3)
@@ -75,7 +74,7 @@ def test_mixed_mass_form_scales_with_diffusion_inverse() -> None:
         coefficients = evaluate_elliptic_coefficients(
             problem, basis_sigma.physical_points
         )
-        return elliptic_mixed_mass_form(basis_sigma, coefficients)
+        return elliptic_mixed_mass_form(basis_sigma, basis_sigma, coefficients)
 
     base = matrix_for(1.0)
     scaled = matrix_for(2.0)
@@ -87,19 +86,23 @@ def test_mixed_div_form_matches_hand_derivation() -> None:
     """P0's single basis value is identically 1, so the div form reduces
     exactly to RT0's own physical divergence."""
     _, basis_sigma, basis_u = _spaces_and_bases()
-    local_matrix = elliptic_mixed_div_form(basis_u, basis_sigma)
+    local_matrix = elliptic_mixed_div_form(basis_u, basis_sigma, None)
 
     assert local_matrix.shape[-2:] == (1, 3)
-    expected = basis_sigma.divergences.mT  # (K, Qsigma, 1, 3), P0's value == 1
-    assert jnp.allclose(local_matrix, jnp.broadcast_to(expected, local_matrix.shape), atol=1e-13)
+    expected = basis_sigma.divergences.mT  # P0's value is 1
+    assert jnp.allclose(
+        local_matrix, jnp.broadcast_to(expected, local_matrix.shape), atol=1e-13
+    )
 
 
 @pytest.mark.unit
 def test_mixed_div_form_is_rectangular_for_multi_cell_mesh() -> None:
     _UNIT_SQUARE_VERTICES = ((0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0))
     _UNIT_SQUARE_CELLS = ((0, 1, 2), (0, 2, 3))
-    _, basis_sigma, basis_u = _spaces_and_bases(_UNIT_SQUARE_VERTICES, _UNIT_SQUARE_CELLS)
-    local_matrix = elliptic_mixed_div_form(basis_u, basis_sigma)
+    _, basis_sigma, basis_u = _spaces_and_bases(
+        _UNIT_SQUARE_VERTICES, _UNIT_SQUARE_CELLS
+    )
+    local_matrix = elliptic_mixed_div_form(basis_u, basis_sigma, None)
     k = 2
     assert local_matrix.shape[0] == k
     assert local_matrix.shape[-2:] == (1, 3)

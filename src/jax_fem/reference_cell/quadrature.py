@@ -1,6 +1,5 @@
-"""Quadrature rules on reference cells.
-
-See Section 8.3 of the architecture specification.
+"""
+Quadrature rules on reference cells.
 """
 
 from __future__ import annotations
@@ -18,31 +17,28 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True, slots=True, eq=False)
 class QuadratureRule:
-    """A quadrature rule attached to one reference cell.
-
-    Quadrature is a separate immutable data object because different
-    operations (e.g. mass vs. stiffness assembly, error functionals) may
-    require different exactness degrees on the same reference cell.
+    """
+    A quadrature rule on a reference cell.
 
     Attributes
     ----------
-    reference_cell:
-        The reference cell this rule integrates over.
-    points:
-        Quadrature points in reference coordinates, shape ``(1, Q, 1, d)``.
-        The leading size-1 axis mirrors the cell axis of a ``CellBasis``:
-        a reference-only quantity broadcasts against it directly.
-    weights:
-        Quadrature weights, shape ``(1, Q, 1, 1)``. Normalized so that
-        ``jnp.sum(weights) == 1``: a barycentric partition of the reference
-        cell, not its geometric measure. Converting to physical integration
-        weights multiplies in ``reference_cell.measure`` and the Jacobian
-        determinants (Section 6.3).
-    exactness_degree:
-        The rule integrates every polynomial of total degree at most this
-        value exactly. May exceed the degree originally requested from
-        ``ReferenceCell.create_quadrature`` when no rule of that exact
-        degree is tabulated.
+    reference_cell : ReferenceCell
+        The reference cell the rule integrates over.
+    points : jax.Array
+        Reference quadrature points, shape ``(1, Q, 1, d)``.
+    weights : jax.Array
+        Quadrature weights normalized to sum to one, shape ``(1, Q, 1, 1)``.
+    exactness_degree : int
+        Highest total polynomial degree integrated exactly.
+
+    Notes
+    -----
+    The leading size-one axis mirrors the cell axis of a ``CellBasis``, so
+    reference quantities broadcast against cellwise arrays. Weights form a
+    partition of the reference cell rather than its measure; physical weights
+    multiply in ``reference_cell.measure`` and the Jacobian determinants.
+    ``exactness_degree`` may exceed the requested degree when no rule of
+    exactly that degree is tabulated.
     """
 
     reference_cell: ReferenceCell
@@ -51,6 +47,15 @@ class QuadratureRule:
     exactness_degree: int
 
     def __post_init__(self) -> None:
+        """
+        Validate the shapes of the points and weights.
+
+        Raises
+        ------
+        ValueError
+            If ``points`` is not ``(1, Q, 1, d)``, ``weights`` is not
+            ``(1, Q, 1, 1)``, or ``exactness_degree`` is negative.
+        """
         if self.points.ndim != 4 or self.points.shape[0] != 1:
             raise ValueError(
                 "QuadratureRule.points must have shape (1, Q, 1, d), got "
@@ -70,12 +75,9 @@ class QuadratureRule:
             )
 
 
-# Hand-coded symmetric quadrature rules on the standard reference triangle
-# conv{(0, 0), (1, 0), (0, 1)}. Points are given in Cartesian reference
-# coordinates and weights are normalized to sum to 1 (Section 8.3), following
-# the standard Dunavant / Hammer-Marlowe-Stroud tables (whose published
-# weights already sum to 1 and are conventionally scaled by the reference
-# triangle's area of 0.5 to obtain integration weights).
+# Symmetric Dunavant / Hammer-Marlowe-Stroud rules on the reference triangle
+# conv{(0, 0), (1, 0), (0, 1)}, keyed by exactness degree. Points are in
+# Cartesian reference coordinates and weights sum to one.
 _TRIANGLE_RULES: dict[
     int, tuple[tuple[tuple[float, float], ...], tuple[float, ...]]
 ] = {
@@ -139,7 +141,23 @@ _TRIANGLE_RULES: dict[
 def _select_quadrature_degree(
     available_degrees: list[int], exactness_degree: int, cell_name: str
 ) -> int:
-    """The smallest tabulated degree at least ``exactness_degree``, or raise."""
+    """
+    Smallest tabulated degree that reaches the requested exactness.
+
+    Parameters
+    ----------
+    available_degrees : list[int]
+        Tabulated exactness degrees, sorted in increasing order.
+    exactness_degree : int
+        Requested exactness degree, at least one.
+    cell_name : str
+        Reference cell name used in error messages.
+
+    Returns
+    -------
+    selected_degree : int
+        The smallest available degree that is at least ``exactness_degree``.
+    """
     if exactness_degree < 1:
         raise ValueError(
             f"exactness_degree must be at least 1, got {exactness_degree}."
@@ -161,46 +179,43 @@ def create_triangle_quadrature(
     reference_cell: ReferenceCell,
     exactness_degree: int,
 ) -> QuadratureRule:
-    """Build a triangle quadrature rule exact to at least ``exactness_degree``.
+    """
+    Triangle quadrature rule exact to at least the requested degree.
 
     Parameters
     ----------
-    reference_cell:
+    reference_cell : ReferenceCell
         The reference triangle the rule is attached to.
-    exactness_degree:
-        Minimum polynomial exactness degree required, at least ``1``.
+    exactness_degree : int
+        Minimum polynomial exactness degree, at least one.
 
     Returns
     -------
-    QuadratureRule
-        ``points`` has shape ``(1, Q, 1, 2)``, ``weights`` has shape
-        ``(1, Q, 1, 1)`` and sums to ``1``, and ``exactness_degree`` is the
-        actual exactness of the selected rule: the smallest tabulated degree
-        that is at least the requested one, which may be larger than
-        requested when no rule of that exact degree is tabulated.
+    quadrature : QuadratureRule
+        Rule with points of shape ``(1, Q, 1, 2)`` and weights of shape
+        ``(1, Q, 1, 1)``.
+
+    Notes
+    -----
+    The rule is the smallest tabulated one reaching ``exactness_degree``; its
+    ``exactness_degree`` attribute records the actual degree, which may be
+    higher than requested.
     """
     selected_degree = _select_quadrature_degree(
         sorted(_TRIANGLE_RULES), exactness_degree, "triangle"
     )
-
     raw_points, raw_weights = _TRIANGLE_RULES[selected_degree]
-    points = jnp.asarray(raw_points).reshape(1,-1, 1, 2)
-    weights = jnp.asarray(raw_weights).reshape(1,-1, 1, 1)
-
     return QuadratureRule(
         reference_cell=reference_cell,
-        points=points,
-        weights=weights,
+        points=jnp.expand_dims(jnp.asarray(raw_points), axis=(-4, -2)),
+        weights=jnp.expand_dims(jnp.asarray(raw_weights), axis=(-4, -2, -1)),
         exactness_degree=selected_degree,
     )
 
 
-# Gauss-Legendre quadrature rules on the standard reference interval [0, 1],
-# used for 1D facet quadrature (Section 4.2). An n-point Gauss-Legendre rule
-# is exact to polynomial degree 2n-1; nodes/weights are the standard
-# reference-interval [-1, 1] rule affinely mapped to [0, 1] (node -> (node +
-# 1) / 2, weight -> weight / 2), so weights still sum to 1 (Section 8.3's
-# normalization convention).
+# Gauss-Legendre rules on the reference interval [0, 1], keyed by exactness
+# degree. An n-point rule is exact to degree 2n - 1; the standard [-1, 1]
+# nodes and weights are mapped affinely to [0, 1], so the weights sum to one.
 _INTERVAL_RULES: dict[int, tuple[tuple[float, ...], tuple[float, ...]]] = {
     # 1 point, exact for degree <= 1.
     1: ((0.5,), (1.0,)),
@@ -228,36 +243,33 @@ def create_interval_quadrature(
     reference_cell: ReferenceCell,
     exactness_degree: int,
 ) -> QuadratureRule:
-    """Build a reference-interval quadrature rule exact to at least
-    ``exactness_degree``.
+    """
+    Interval quadrature rule exact to at least the requested degree.
 
     Parameters
     ----------
-    reference_cell:
-        The ``ReferenceInterval`` the rule is attached to.
-    exactness_degree:
-        Minimum polynomial exactness degree required, at least ``1``.
+    reference_cell : ReferenceCell
+        The reference interval the rule is attached to.
+    exactness_degree : int
+        Minimum polynomial exactness degree, at least one.
 
     Returns
     -------
-    QuadratureRule
-        ``points`` has shape ``(1, Q, 1, 1)``, ``weights`` has shape
-        ``(1, Q, 1, 1)`` and sums to ``1``, and ``exactness_degree`` is the
-        actual exactness of the selected rule (see
-        ``create_triangle_quadrature``'s docstring for the selection rule,
-        identical here).
+    quadrature : QuadratureRule
+        Rule with points of shape ``(1, Q, 1, 1)`` and weights of shape
+        ``(1, Q, 1, 1)``.
+
+    Notes
+    -----
+    Selection follows ``create_triangle_quadrature``.
     """
     selected_degree = _select_quadrature_degree(
         sorted(_INTERVAL_RULES), exactness_degree, "interval"
     )
-
     raw_points, raw_weights = _INTERVAL_RULES[selected_degree]
-    points = jnp.asarray(raw_points).reshape(1, -1, 1, 1)
-    weights = jnp.asarray(raw_weights).reshape(1, -1, 1, 1)
-
     return QuadratureRule(
         reference_cell=reference_cell,
-        points=points,
-        weights=weights,
+        points=jnp.expand_dims(jnp.asarray(raw_points), axis=(-4, -2, -1)),
+        weights=jnp.expand_dims(jnp.asarray(raw_weights), axis=(-4, -2, -1)),
         exactness_degree=selected_degree,
     )

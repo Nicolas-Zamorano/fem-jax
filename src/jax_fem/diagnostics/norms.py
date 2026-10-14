@@ -1,5 +1,5 @@
 """
-Pointwise error-density functionals for L2, H1-seminorm, and energy norms.
+Pointwise squared-error functionals for the L2, H1-seminorm, and energy errors.
 """
 
 from __future__ import annotations
@@ -7,35 +7,35 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 import jax
-import jax.numpy as jnp
 
 from jax_fem.function.evaluation import FiniteElementFunctionEvaluation
-from jax_fem.problem.elliptic import EllipticProblem
-from jax_fem.space.cell_basis import CellBasis
+from jax_fem.problem.elliptic import EllipticProblem, evaluate_elliptic_coefficients
+from jax_fem.space.cell_basis import CellBasis, compute_tangent_projectors
 
 _SOLUTION_FIELD = "solution"
 
 
-def l2_error_density(
+def l2_error_functional(
     basis: CellBasis,
     fields: Mapping[str, FiniteElementFunctionEvaluation],
     problem: EllipticProblem,
 ) -> jax.Array:
-    """Pointwise squared L2 error density ``(u_h - u_exact)^2``.
+    """
+    Pointwise squared L2 error.
 
     Parameters
     ----------
     basis : CellBasis
-        The cell basis.
+        Evaluated basis of the solution.
     fields : Mapping[str, FiniteElementFunctionEvaluation]
-        The finite element solution.
+        The finite element solution under the key ``"solution"``.
     problem : EllipticProblem
-        The elliptic problem, requires ``problem.exact_solution``.
+        The elliptic problem; requires ``exact_solution``.
 
     Returns
     -------
-    l2_error : jax.Array
-        Pointwise squared L2 error density, shape ``(K, Q, 1, 1)``.
+    pointwise_values : jax.Array
+        ``(u_h - u)^2`` at the quadrature points, shape ``(K, Q, 1, 1)``.
     """
     if problem.exact_solution is None:
         raise ValueError("problem.exact_solution is required for the L2 error.")
@@ -44,93 +44,101 @@ def l2_error_density(
     return difference * difference
 
 
-def h1_seminorm_error_density(
+def h1_seminorm_error_functional(
     basis: CellBasis,
     fields: Mapping[str, FiniteElementFunctionEvaluation],
     problem: EllipticProblem,
 ) -> jax.Array:
-    """Pointwise squared H1-seminorm error density ``|grad u_h - grad u_exact|^2``.
+    """
+    Pointwise squared H1-seminorm error.
 
     Parameters
     ----------
     basis : CellBasis
-        The cell basis.
+        Evaluated basis of the solution.
     fields : Mapping[str, FiniteElementFunctionEvaluation]
-        The finite element solution.
+        The finite element solution under the key ``"solution"``.
     problem : EllipticProblem
-        The elliptic problem, requires ``problem.exact_gradient``.
+        The elliptic problem; requires ``exact_gradient``.
 
     Returns
     -------
-    h1_seminorm_error : jax.Array
-        Pointwise squared H1-seminorm error density, shape ``(K, Q, 1, 1)``.
+    pointwise_values : jax.Array
+        ``|grad u_h - grad u P|^2`` at the quadrature points, shape
+        ``(K, Q, 1, 1)``.
+
+    Notes
+    -----
+    ``P`` is the projector onto each cell's tangent space (see
+    ``compute_tangent_projectors``): the identity on a planar mesh, and the
+    removal of the normal component on cells embedded in ``R^3``, where
+    ``grad u`` may be the gradient of a function on the ambient space.
     """
     if problem.exact_gradient is None:
         raise ValueError(
             "problem.exact_gradient is required for the H1 seminorm error."
         )
-    exact_gradients = problem.exact_gradient(basis.physical_points)
+    exact_gradients = problem.exact_gradient(
+        basis.physical_points
+    ) @ compute_tangent_projectors(basis)
     difference = fields[_SOLUTION_FIELD].gradients - exact_gradients
     return difference @ difference.mT
 
 
-def energy_error_density(
+def energy_error_functional(
     basis: CellBasis,
     fields: Mapping[str, FiniteElementFunctionEvaluation],
     problem: EllipticProblem,
 ) -> jax.Array:
     """
-    Pointwise squared energy error density.
-
-    ``(grad e)^T A (grad e) + (c - div(beta) / 2) e^2``, where
-    ``e = u_h - u_exact``. This is the coercive energy norm associated with
-    the elliptic operator: under ``A = A^T`` uniformly positive definite,
-    ``c - div(beta) / 2 >= 0``, and ``e`` in ``H^1_0(Omega)`` (e.g.
-    homogeneous Dirichlet data, or boundary data represented exactly by the
-    discrete trace space), the boundary contribution from the advection term
-    vanishes and ``a(v, v) = ||v||_E^2`` for this density.
+    Pointwise squared energy error.
 
     Parameters
     ----------
     basis : CellBasis
-        The cell basis.
+        Evaluated basis of the solution.
     fields : Mapping[str, FiniteElementFunctionEvaluation]
-        The finite element solution.
+        The finite element solution under the key ``"solution"``.
     problem : EllipticProblem
-        The elliptic problem, requires ``problem.exact_solution``,
-        ``problem.exact_gradient``, and ``problem.advection_divergence``.
+        The elliptic problem; requires ``exact_solution`` and
+        ``exact_gradient``.
 
     Returns
     -------
-    energy_error : jax.Array
-        Pointwise squared energy error density, shape ``(K, Q, 1, 1)``.
+    pointwise_values : jax.Array
+        ``(grad e)^T A grad e + (c - div(beta) / 2) e^2`` with
+        ``e = u_h - u`` at the quadrature points, shape ``(K, Q, 1, 1)``.
+
+    Notes
+    -----
+    This is the energy norm of the elliptic operator. When ``A`` is symmetric
+    uniformly positive definite, ``c - div(beta) / 2 >= 0``, and ``e`` lies in
+    ``H^1_0`` (e.g. homogeneous Dirichlet data, or boundary data represented
+    exactly by the discrete space), the advection boundary term vanishes and
+    ``a(e, e)`` equals the integrated functional.
+
+    The exact gradient is projected onto each cell's tangent space, as in
+    ``h1_seminorm_error_functional``.
     """
     if problem.exact_solution is None:
         raise ValueError("problem.exact_solution is required for the energy error.")
     if problem.exact_gradient is None:
         raise ValueError("problem.exact_gradient is required for the energy error.")
-    if problem.advection_divergence is None:
-        raise ValueError(
-            "problem.advection_divergence is required for the energy error."
-        )
 
     exact_values = problem.exact_solution(basis.physical_points)
-    exact_gradients = problem.exact_gradient(basis.physical_points)
+    exact_gradients = problem.exact_gradient(
+        basis.physical_points
+    ) @ compute_tangent_projectors(basis)
     value_difference = fields[_SOLUTION_FIELD].values - exact_values
     gradient_difference = fields[_SOLUTION_FIELD].gradients - exact_gradients
 
-    diffusion = problem.diffusion(basis.physical_points)
+    coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
     diffusion_term = (
-        gradient_difference
-        @ diffusion
-        @ jnp.swapaxes(gradient_difference, -1, -2)
+        gradient_difference @ coefficients.diffusion @ gradient_difference.mT
     )
-
-    reaction = problem.reaction(basis.physical_points)
-    advection_divergence = problem.advection_divergence(
-        basis.physical_points
+    symmetrized_reaction = (
+        coefficients.reaction - 0.5 * coefficients.advection_divergence
     )
-    symmetrized_reaction = reaction - 0.5 * advection_divergence
     reaction_term = symmetrized_reaction * (value_difference * value_difference)
 
     return diffusion_term + reaction_term

@@ -1,14 +1,10 @@
-"""A lightweight finite element library implemented with JAX.
-
-See ``.claude/JAX_FEM_Library_Architecture.md`` for the full architecture
-specification this package follows.
+"""
+A lightweight finite element library implemented with JAX.
 
 Importing this package enables 64-bit precision in JAX (``jax_enable_x64``).
-This must happen before any other JAX computation, and before any array is
-created anywhere in the process, so it is done once here at package import
-time rather than left for users to configure. FEM convergence studies rely
-on float64 to see expected a priori error rates without float32 roundoff
-masking them.
+This must happen before any array is created, so it is done once at import
+time. Convergence studies need float64 to observe the expected rates without
+float32 round-off masking them.
 """
 
 import jax

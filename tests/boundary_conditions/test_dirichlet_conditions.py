@@ -1,13 +1,9 @@
-"""Tests for Dirichlet condensation and solution reconstruction.
-
-See Section 15 of the architecture specification; BC-01 through BC-03 of
-the FEM testing plan.
-"""
+"""Tests for Dirichlet condensation and solution reconstruction."""
 
 import jax.numpy as jnp
 import pytest
 
-from jax_fem.assembly import assemble_bilinear_form, assemble_linear_form
+from jax_fem.assembly import assemble_matrix, assemble_vector, integrate_cellwise
 from jax_fem.constraints import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
@@ -69,7 +65,7 @@ def test_dirichlet_condition_convenience_constructor() -> None:
 def test_boundary_dof_classification_is_disjoint_and_covering(
     four_triangle_center_vertex_mesh, p1_element
 ) -> None:
-    """BC-01: boundary and free DOFs are disjoint and together cover all DOFs.
+    """Boundary and free DOFs are disjoint and together cover all DOFs.
 
     On the four-triangle center-vertex mesh, the 4 boundary vertices are
     constrained and the 1 interior (center) vertex is free.
@@ -109,10 +105,10 @@ def test_evaluate_dirichlet_dof_values_single_condition() -> None:
 @pytest.mark.unit
 @pytest.mark.integration
 def test_boundary_values_match_nonlinear_function_at_dof_coordinates() -> None:
-    """BC-03: every constrained coefficient equals g evaluated at its DOF coordinate.
+    """Every constrained coefficient equals g evaluated at its DOF coordinate.
 
-    Uses a boundary function nonlinear in space (Section BC-03's suggested
-    ``g(x,y) = 1 + x + 2y + x^2``): Dirichlet evaluation is exact
+    Uses a boundary function nonlinear in space,
+    ``g(x,y) = 1 + x + 2y + x^2``: Dirichlet evaluation is exact
     regardless of whether g is representable by the P1 space, since it is
     a pointwise evaluation at DOF coordinates, not an interpolation claim.
     """
@@ -179,14 +175,20 @@ def _make_laplacian_matrix_and_vector():
         dirichlet_conditions=(),
     )
     coefficients = evaluate_elliptic_coefficients(problem, basis.physical_points)
-    matrix = assemble_bilinear_form(elliptic_bilinear_form, basis, coefficients)
-    vector = assemble_linear_form(elliptic_linear_form, basis, coefficients)
+    local_matrices = integrate_cellwise(
+        elliptic_bilinear_form(basis, basis, coefficients), basis.physical_weights
+    )
+    matrix = assemble_matrix(local_matrices, basis.space, basis.space)
+    local_vectors = integrate_cellwise(
+        elliptic_linear_form(basis, coefficients), basis.physical_weights
+    )
+    vector = assemble_vector(local_vectors, basis.space)
     return matrix, vector
 
 
 @pytest.mark.unit
 def test_condense_dirichlet_system_matches_hand_derivation() -> None:
-    """BC-02: nonhomogeneous elimination, with a nonzero coupling block K_IB."""
+    """Nonhomogeneous elimination, with a nonzero coupling block K_IB."""
     matrix, vector = _make_laplacian_matrix_and_vector()
     dirichlet_dofs = jnp.array([0, 1])
     dirichlet_values = jnp.array([[2.0], [3.0]])
@@ -229,7 +231,7 @@ def test_expand_condensed_solution_round_trip() -> None:
 @pytest.mark.unit
 @pytest.mark.end_to_end
 def test_solved_solution_recovers_prescribed_dirichlet_values() -> None:
-    """BC-03, algebraic variant: constrained DOFs equal g after a full solve."""
+    """Constrained DOFs equal g after a full solve."""
     matrix, vector = _make_laplacian_matrix_and_vector()
     dirichlet_dofs = jnp.array([0, 1, 3])
     dirichlet_values = jnp.array([[0.0], [0.0], [0.0]])

@@ -1,15 +1,13 @@
 """
-High-level error computations for the mixed (H(div)) flux solution.
-
-See Section 5.4 of the implementation plan (``.context/implementation_plan.md``).
+Error norms of a mixed (H(div)) flux solution.
 """
 
 import jax
 
 from jax_fem.diagnostics.errors import _integrated_norm
 from jax_fem.diagnostics.mixed_norms import (
-    flux_divergence_l2_error_density,
-    flux_l2_error_density,
+    flux_divergence_l2_error_functional,
+    flux_l2_error_functional,
 )
 from jax_fem.function.finite_element_function import FiniteElementFunction
 from jax_fem.problem.elliptic import EllipticProblem
@@ -41,10 +39,10 @@ def compute_flux_l2_error(
     Returns
     -------
     flux_l2_error : jax.Array
-        The absolute flux L2 error, shape ``()`` or ``(K,)``.
+        The absolute flux L2 error, shape ``()`` or ``(K, 1, 1, 1)``.
     """
     return _integrated_norm(
-        flux_l2_error_density, flux_solution, basis, problem, reduce
+        flux_l2_error_functional, flux_solution, basis, problem, reduce
     )
 
 
@@ -59,7 +57,7 @@ def compute_flux_divergence_l2_error(
     ``||div(sigma_h) - div(sigma_exact)||_{L2(Omega)}``.
 
     ``div(sigma_exact) == problem.source`` exactly for the mixed Poisson
-    system (Section 5.1), so this only requires ``problem.source``.
+    system, so this only requires ``problem.source``.
 
     Parameters
     ----------
@@ -76,8 +74,8 @@ def compute_flux_divergence_l2_error(
     Returns
     -------
     flux_divergence_l2_error : jax.Array
-        The absolute flux-divergence L2 error, shape ``()`` or ``(K,)``.
+        The absolute flux-divergence L2 error, shape ``()`` or ``(K, 1, 1, 1)``.
     """
     return _integrated_norm(
-        flux_divergence_l2_error_density, flux_solution, basis, problem, reduce
+        flux_divergence_l2_error_functional, flux_solution, basis, problem, reduce
     )

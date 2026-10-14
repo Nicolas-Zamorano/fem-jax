@@ -1,4 +1,4 @@
-"""Reference cells and quadrature rules (Section 8)."""
+"""Reference cells and quadrature rules."""
 
 from jax_fem.reference_cell.base import ReferenceCell
 from jax_fem.reference_cell.interval import ReferenceInterval
