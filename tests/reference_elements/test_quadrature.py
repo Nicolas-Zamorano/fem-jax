@@ -18,14 +18,14 @@ def _exact_monomial_integral(i: int, j: int) -> float:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5, 6, 7, 8])
 def test_weights_sum_to_one(requested_degree: int, reference_triangle) -> None:
     quadrature = reference_triangle.create_quadrature(requested_degree)
     assert jnp.sum(quadrature.weights) == pytest.approx(1.0, abs=1e-14)
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5, 6, 7, 8])
 def test_shapes(requested_degree: int, reference_triangle) -> None:
     quadrature = reference_triangle.create_quadrature(requested_degree)
     number_of_points = quadrature.points.shape[1]
@@ -34,7 +34,7 @@ def test_shapes(requested_degree: int, reference_triangle) -> None:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5, 6, 7, 8])
 def test_selected_exactness_covers_request(
     requested_degree: int, reference_triangle
 ) -> None:
@@ -49,8 +49,26 @@ def test_degree_three_reuses_degree_four_rule(reference_triangle) -> None:
 
 
 @pytest.mark.unit
+def test_degree_seven_reuses_degree_eight_rule(reference_triangle) -> None:
+    quadrature = reference_triangle.create_quadrature(7)
+    assert quadrature.exactness_degree == 8
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("requested_degree", [6, 8])
+def test_high_degree_rules_have_positive_weights_and_interior_points(
+    requested_degree: int, reference_triangle
+) -> None:
+    quadrature = reference_triangle.create_quadrature(requested_degree)
+    points = quadrature.points[0, :, 0, :]
+    assert jnp.all(quadrature.weights > 0.0)
+    assert jnp.all(points > 0.0)
+    assert jnp.all(jnp.sum(points, axis=-1) < 1.0)
+
+
+@pytest.mark.unit
 @pytest.mark.property
-@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("requested_degree", [1, 2, 3, 4, 5, 6, 7, 8])
 def test_exact_for_all_monomials_up_to_degree(
     requested_degree: int, reference_triangle
 ) -> None:

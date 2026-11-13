@@ -44,7 +44,7 @@ def p2_element(reference_triangle: ReferenceTriangle) -> LagrangeTriangleP2:
     return LagrangeTriangleP2(reference_cell=reference_triangle)
 
 
-@pytest.fixture(params=[1, 2, 3, 4, 5], ids=lambda degree: f"degree{degree}")
+@pytest.fixture(params=[1, 2, 3, 4, 5, 6, 7, 8], ids=lambda degree: f"degree{degree}")
 def quadrature_rule(request, reference_triangle: ReferenceTriangle):
     """A triangle quadrature rule, parameterized over every exactness degree."""
     return reference_triangle.create_quadrature(request.param)

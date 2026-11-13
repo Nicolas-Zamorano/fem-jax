@@ -7,6 +7,7 @@ from jax_fem.constraints.dirichlet import (
     condense_dirichlet_system,
     evaluate_dirichlet_dof_values,
     expand_condensed_solution,
+    condense_matrix,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "CondensedSystem",
     "condense_dirichlet_system",
     "expand_condensed_solution",
+    "condense_matrix"
 ]

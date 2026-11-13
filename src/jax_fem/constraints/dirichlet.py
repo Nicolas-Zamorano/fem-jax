@@ -2,6 +2,7 @@
 Dirichlet condensation and solution reconstruction.
 """
 
+from ast import Global
 import dataclasses
 
 import jax
@@ -218,3 +219,62 @@ def expand_condensed_solution(
     return full.at[condensed_system.dirichlet_dofs].set(
         condensed_system.dirichlet_values
     )
+
+def condense_matrix(matrix:GlobalMatrix, dirichlet_dofs:jax.Array)->GlobalMatrix:
+    """
+    Eliminate Dirichlet DOFs from a assembled matrix.
+
+    Parameters
+    ----------
+    matrix : GlobalMatrix
+        Assembled global matrix, shape ``(dofs_test, dofs_test)``.
+
+    dirichlet_dofs : jax.Array
+        Global indices of the DOFs to eliminate, shape ``(N_dirichlet,)``.
+    dirichlet_values : jax.Array
+        Prescribed values at ``dirichlet_dofs``, shape ``(N_dirichlet, 1)``.
+
+    Returns
+    -------
+    condensed_matrix : GlobalMatrix
+        The system ``A_ff`` and the data needed to
+        rebuild the full solution.
+
+    Notes
+    -----
+    The matrix stays sparse: its entries are filtered by whether their row
+    and column DOFs are free and reindexed into the free numbering.
+    Duplicate ``(row, col)`` entries are preserved and summed on use, as in
+    the unconstrained matrix.
+    """
+    number_of_dofs = matrix.shape[0]
+
+    is_dirichlet = jnp.zeros((number_of_dofs,), dtype=bool)
+    is_dirichlet = is_dirichlet.at[dirichlet_dofs].set(True)
+    free_dofs = jnp.nonzero(~is_dirichlet)[0]
+
+    free_index_of = jnp.full((number_of_dofs,), -1, dtype=jnp.int32)
+    free_index_of = free_index_of.at[free_dofs].set(
+        jnp.arange(free_dofs.shape[0], dtype=jnp.int32)
+    )
+
+    rows = matrix.indices[..., 0]
+    columns = matrix.indices[..., 1]
+    data = matrix.data
+
+    row_is_free = ~is_dirichlet[rows]
+    column_is_free = ~is_dirichlet[columns]
+
+    free_free = row_is_free & column_is_free
+    a_ff = jax_sparse.BCOO(
+        (
+            data[free_free],
+            jnp.stack(
+                (free_index_of[rows[free_free]], free_index_of[columns[free_free]]),
+                axis=-1,
+            ),
+        ),
+        shape=(free_dofs.shape[0], free_dofs.shape[0]),
+    )
+
+    return a_ff
